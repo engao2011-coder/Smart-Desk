@@ -28,8 +28,6 @@
 #pragma once
 
 #include <TFT_eSPI.h>
-#include <Fonts/FreeSansBold24pt7b.h>
-#include <Fonts/FreeSansBold18pt7b.h>
 #include "config.h"
 #include "weather.h"
 #include "prayer.h"

@@ -109,7 +109,7 @@ static bool fetch() {
     current.pressureHpa = doc["main"]["pressure"]   | 0;
     current.windSpeedMs = doc["wind"]["speed"]      | 0.0f;
     current.visibility  = doc["visibility"]         | 0;
-    current.cityName    = String((const char*)doc["name"] | OWM_CITY_NAME);
+    current.cityName    = String(doc["name"] | OWM_CITY_NAME);
 
     JsonArray weather = doc["weather"].as<JsonArray>();
     if (!weather.isNull() && weather.size() > 0) {
