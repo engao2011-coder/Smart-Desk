@@ -12,8 +12,9 @@
 
 // ---------------------------------------------------------------------------
 // Display (TFT_eSPI) — pinout for CYD ESP32-2432S028R
-// These pins are defined here for reference; the actual library is
-// configured via platformio.ini or the User_Setup.h inside TFT_eSPI.
+// These pins are defined here for application use (backlight, touch IRQ).
+// The SPI/driver settings for TFT_eSPI are configured via build_flags in
+// platformio.ini — no manual User_Setup.h editing is required.
 // ---------------------------------------------------------------------------
 #define TFT_BL_PIN     21   // Backlight PWM pin
 #define TOUCH_CS_PIN   33   // XPT2046 chip-select

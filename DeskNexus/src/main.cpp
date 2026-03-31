@@ -1,5 +1,5 @@
 /*
- * DeskNexus.ino — Main Arduino Sketch
+ * main.cpp — DeskNexus Main Sketch (PlatformIO)
  *
  * ESP32-WROOM-32 desk clock with:
  *  • Real-time clock (NTP synced)
@@ -13,35 +13,20 @@
  * Hardware: 2.8" ILI9341 TFT (240×320) + XPT2046 touch
  *           on an ESP32-2432S028R ("Cheap Yellow Display" / CYD)
  *
- * ── Required libraries (install via Arduino Library Manager) ────────────────
+ * ── Required libraries (declared in platformio.ini — installed automatically) ──
  *  • TFT_eSPI            by Bodmer
  *  • XPT2046_Touchscreen by Paul Stoffregen
  *  • ArduinoJson         by Benoit Blanchon  (v6.x)
  *
- * ── TFT_eSPI User_Setup ─────────────────────────────────────────────────────
- *  In the TFT_eSPI library folder, copy User_Setup_Select.h and uncomment
- *  the line for "Setup45_TTGO_T_Watch.h" OR create a custom User_Setup.h
- *  with the following definitions for the CYD board:
- *
- *   #define ILI9341_DRIVER
- *   #define TFT_MOSI 13
- *   #define TFT_SCLK 14
- *   #define TFT_CS   15
- *   #define TFT_DC    2
- *   #define TFT_RST  -1
- *   #define TOUCH_CS 33
- *   #define SPI_FREQUENCY       40000000
- *   #define SPI_TOUCH_FREQUENCY  2500000
- *   #define LOAD_GLCD
- *   #define LOAD_FONT2
- *   #define LOAD_GFXFF
- *   #define SMOOTH_FONT
+ * ── TFT_eSPI Configuration ──────────────────────────────────────────────────
+ *  TFT_eSPI pin and driver settings are configured via build_flags in
+ *  platformio.ini. No manual editing of User_Setup.h is required.
  *
  * ── Configuration ────────────────────────────────────────────────────────────
- *  Edit config.h to set your API keys, city, timezone offset, and stock list.
+ *  Edit src/config.h to set your API keys, city, timezone offset, and stock list.
  *
  * ── First-Time WiFi Setup ────────────────────────────────────────────────────
- *  1. Flash the sketch.
+ *  1. Flash the sketch (pio run --target upload).
  *  2. If no credentials are stored, the device starts as Wi-Fi AP "DeskNexus-Setup".
  *  3. Connect to that network from your phone/laptop.
  *  4. Browse to http://192.168.4.1 and enter your home Wi-Fi credentials.

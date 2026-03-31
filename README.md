@@ -48,61 +48,49 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 
 ```
 DeskNexus/
-├── DeskNexus.ino   ← Main Arduino sketch (setup / loop / state machine)
-├── config.h        ← User configuration (API keys, city, stocks, timezone)
-├── network.h       ← Hybrid WiFi manager (STA + AP captive portal)
-├── weather.h       ← OpenWeatherMap integration
-├── prayer.h        ← Aladhan prayer-times integration
-├── stocks.h        ← Alpha Vantage stock-quote integration
-└── ui.h            ← TFT display layout & drawing helpers
+├── platformio.ini  ← PlatformIO build configuration (board, libs, TFT pins)
+└── src/
+    ├── main.cpp    ← Main sketch (setup / loop / state machine)
+    ├── config.h    ← User configuration (API keys, city, stocks, timezone)
+    ├── network.h   ← Hybrid WiFi manager (STA + AP captive portal)
+    ├── weather.h   ← OpenWeatherMap integration
+    ├── prayer.h    ← Aladhan prayer-times integration
+    ├── stocks.h    ← Alpha Vantage stock-quote integration
+    └── ui.h        ← TFT display layout & drawing helpers
 ```
 
 ---
 
 ## Getting Started
 
-### 1  Install Arduino IDE & Board Support
+### 1  Install PlatformIO
 
-1. Add the ESP32 board package URL in **Preferences → Additional Board Manager URLs**:
-   ```
-   https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-   ```
-2. Install **esp32** via *Tools → Board → Boards Manager*.
-3. Select **ESP32 Dev Module** (or the CYD-specific board if available).
+Install the [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode) for VS Code,
+or use the PlatformIO Core CLI:
 
-### 2  Install Libraries
-
-Install the following via *Sketch → Include Library → Manage Libraries*:
-
-| Library | Author | Min Version |
-|---------|--------|-------------|
-| TFT_eSPI | Bodmer | 2.5 |
-| XPT2046_Touchscreen | Paul Stoffregen | 1.4 |
-| ArduinoJson | Benoit Blanchon | 6.21 |
-
-### 3  Configure TFT_eSPI
-
-In your Arduino libraries folder open `TFT_eSPI/User_Setup.h` and add/change:
-
-```cpp
-#define ILI9341_DRIVER
-#define TFT_MOSI  13
-#define TFT_SCLK  14
-#define TFT_CS    15
-#define TFT_DC     2
-#define TFT_RST   -1
-#define TOUCH_CS  33
-#define SPI_FREQUENCY        40000000
-#define SPI_TOUCH_FREQUENCY   2500000
-#define LOAD_GLCD
-#define LOAD_FONT2
-#define LOAD_GFXFF
-#define SMOOTH_FONT
+```bash
+pip install platformio
 ```
 
-### 4  Edit `config.h`
+### 2  Install dependencies
 
-Open `DeskNexus/config.h` and fill in:
+All libraries are declared in `platformio.ini` and downloaded automatically on first build.
+No manual library installation is needed.
+
+| Library | Author | Version |
+|---------|--------|---------|
+| TFT_eSPI | Bodmer | ^2.5 |
+| XPT2046_Touchscreen | Paul Stoffregen | ^1.4 |
+| ArduinoJson | Benoit Blanchon | ^6.21 |
+
+### 3  TFT_eSPI is pre-configured
+
+The CYD pin assignments and driver settings for TFT_eSPI are declared directly in
+`platformio.ini` via `build_flags`. No manual editing of `TFT_eSPI/User_Setup.h` is required.
+
+### 4  Edit `src/config.h`
+
+Open `DeskNexus/src/config.h` and fill in:
 
 ```cpp
 // Timezone
@@ -132,11 +120,20 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 - Alpha Vantage: <https://www.alphavantage.co/support/#api-key>
 - Aladhan: no key required
 
-### 5  Flash
+### 5  Build & Flash
 
-1. Connect the CYD via USB.
-2. Select the correct port.
-3. Upload.
+```bash
+# Build
+pio run
+
+# Flash (auto-detects the connected ESP32)
+pio run --target upload
+
+# Open serial monitor
+pio device monitor
+```
+
+Or use the PlatformIO IDE toolbar buttons (✓ Build / → Upload / 🔌 Monitor).
 
 ### 6  First-Time WiFi Setup
 
@@ -177,7 +174,7 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 
 ## Touch Calibration
 
-The default calibration values in `config.h` suit most CYD units. If touches
+The default calibration values in `src/config.h` suit most CYD units. If touches
 are inaccurate, run the **Touch_calibrate** example from TFT_eSPI, note the
 five printed values, and paste them into:
 
@@ -191,14 +188,14 @@ five printed values, and paste them into:
 
 | Goal | Where to change |
 |------|----------------|
-| Different city / country | `config.h` → `OWM_CITY_NAME`, `PRAYER_CITY` |
-| Different timezone | `config.h` → `NTP_UTC_OFFSET_SEC` |
-| Different prayer method | `config.h` → `PRAYER_METHOD` |
-| Stock symbols | `config.h` → `STOCK_SYMBOLS[]` |
-| Stock alert threshold | `config.h` → `STOCK_ALERT_PCT` |
-| Colour theme | `ui.h` → colour palette (`C_*` defines) |
-| Backlight timeout | `config.h` → `SCREEN_TIMEOUT_MS` |
-| Temperature units | `config.h` → `OWM_UNITS` (`"metric"` or `"imperial"`) |
+| Different city / country | `src/config.h` → `OWM_CITY_NAME`, `PRAYER_CITY` |
+| Different timezone | `src/config.h` → `NTP_UTC_OFFSET_SEC` |
+| Different prayer method | `src/config.h` → `PRAYER_METHOD` |
+| Stock symbols | `src/config.h` → `STOCK_SYMBOLS[]` |
+| Stock alert threshold | `src/config.h` → `STOCK_ALERT_PCT` |
+| Colour theme | `src/ui.h` → colour palette (`C_*` defines) |
+| Backlight timeout | `src/config.h` → `SCREEN_TIMEOUT_MS` |
+| Temperature units | `src/config.h` → `OWM_UNITS` (`"metric"` or `"imperial"`) |
 
 ---
 
