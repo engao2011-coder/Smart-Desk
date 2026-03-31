@@ -28,7 +28,7 @@
 #define WIFI_CONNECT_TIMEOUT_MS  15000   // ms to wait for STA connection
 
 // Access-Point fallback settings (captive portal)
-#define AP_SSID      "SmartDesk-Setup"
+#define AP_SSID      "DeskNexus-Setup"
 #define AP_PASSWORD  ""                   // Open network; set a password if desired
 
 // ---------------------------------------------------------------------------

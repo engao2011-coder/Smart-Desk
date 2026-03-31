@@ -1,5 +1,5 @@
 /*
- * SmartDesk.ino — Main Arduino Sketch
+ * DeskNexus.ino — Main Arduino Sketch
  *
  * ESP32-WROOM-32 desk clock with:
  *  • Real-time clock (NTP synced)
@@ -42,7 +42,7 @@
  *
  * ── First-Time WiFi Setup ────────────────────────────────────────────────────
  *  1. Flash the sketch.
- *  2. If no credentials are stored, the device starts as Wi-Fi AP "SmartDesk-Setup".
+ *  2. If no credentials are stored, the device starts as Wi-Fi AP "DeskNexus-Setup".
  *  3. Connect to that network from your phone/laptop.
  *  4. Browse to http://192.168.4.1 and enter your home Wi-Fi credentials.
  *  5. The device restarts and connects automatically; credentials are saved.
@@ -122,7 +122,7 @@ static void checkPrayerAlert() {
 // ── setup() ───────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial.println("\n\n=== SmartDesk v1.0 ===");
+    Serial.println("\n\n=== DeskNexus v1.0 ===");
 
     // Init display + splash
     UI::begin();

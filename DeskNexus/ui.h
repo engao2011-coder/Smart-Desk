@@ -447,7 +447,7 @@ static void drawSettingsPanel(bool wifiOk, const String& ip) {
 
     y += ROW;
     tft.setTextColor(C_TEXT_DIM, C_PANEL);
-    tft.setCursor(8, y); tft.print("v1.0  SmartDesk ESP32");
+    tft.setCursor(8, y); tft.print("v1.0  DeskNexus ESP32");
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +518,7 @@ static void showSplash() {
     tft.fillScreen(C_BG);
     tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextColor(C_ACCENT, C_BG);
-    String title = "SmartDesk";
+    String title = "DeskNexus";
     int tw = tft.textWidth(title);
     tft.setCursor((SCREEN_W - tw) / 2, 140);
     tft.print(title);

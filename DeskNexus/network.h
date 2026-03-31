@@ -75,7 +75,7 @@ static String portalPage() {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SmartDesk Setup</title>
+<title>DeskNexus Setup</title>
 <style>
   body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
        display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
@@ -91,7 +91,7 @@ static String portalPage() {
 </head>
 <body>
 <div class="card">
-  <h2>&#128338; SmartDesk Setup</h2>
+  <h2>&#128338; DeskNexus Setup</h2>
   <form method="POST" action="/save">
     <label for="ssid">Wi-Fi Network</label>
     <select name="ssid" id="ssid">
@@ -103,7 +103,7 @@ static String portalPage() {
     <input type="password" id="pass" name="pass" placeholder="Wi-Fi password">
     <input type="submit" value="Connect">
   </form>
-  <p class="msg">SmartDesk will restart after saving.</p>
+  <p class="msg">DeskNexus will restart after saving.</p>
 </div>
 </body>
 </html>

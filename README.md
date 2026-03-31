@@ -1,4 +1,4 @@
-# SmartDesk — ESP32 Desk Clock
+# DeskNexus — ESP32 Desk Clock
 
 An ESP32-based desk clock with a 2.8" colour touchscreen displaying
 real-time clock, weather, daily prayer times, and live stock quotes.
@@ -47,8 +47,8 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 ## Project Structure
 
 ```
-SmartDesk/
-├── SmartDesk.ino   ← Main Arduino sketch (setup / loop / state machine)
+DeskNexus/
+├── DeskNexus.ino   ← Main Arduino sketch (setup / loop / state machine)
 ├── config.h        ← User configuration (API keys, city, stocks, timezone)
 ├── network.h       ← Hybrid WiFi manager (STA + AP captive portal)
 ├── weather.h       ← OpenWeatherMap integration
@@ -102,7 +102,7 @@ In your Arduino libraries folder open `TFT_eSPI/User_Setup.h` and add/change:
 
 ### 4  Edit `config.h`
 
-Open `SmartDesk/config.h` and fill in:
+Open `DeskNexus/config.h` and fill in:
 
 ```cpp
 // Timezone
@@ -141,7 +141,7 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 ### 6  First-Time WiFi Setup
 
 1. On first boot (or if saved credentials fail) the device broadcasts
-   **SmartDesk-Setup** (open Wi-Fi AP).
+   **DeskNexus-Setup** (open Wi-Fi AP).
 2. Connect to it from your phone or laptop.
 3. Open **http://192.168.4.1** in a browser.
 4. Select your home network from the dropdown, enter the password, tap **Connect**.
