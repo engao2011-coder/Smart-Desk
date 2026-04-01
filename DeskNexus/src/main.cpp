@@ -200,7 +200,7 @@ void loop() {
         bool timeOk = getLocalTime(&t);
 
         bool wifiOk  = Network::isConnected();
-        String ip    = Network::ipAddress();
+        String ip    = Network::localAddress();
         String date  = timeOk ? buildDateString(t) : "--";
 
         // Re-NTP sync if we haven't synced yet

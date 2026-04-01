@@ -7,19 +7,19 @@
  * Screen layout (portrait, 240 wide × 320 tall):
  *
  *  ┌────────────────────────┐ y=0
- *  │   Status bar  (24 px)  │  WiFi icon, date string, IP
+ *  │   Status bar  (24 px)  │  WiFi icon, date string
  *  ├────────────────────────┤ y=24
  *  │                        │
- *  │   Clock   (88 px)      │  HH:MM large, seconds small
+ *  │   Clock   (88 px)      │  HH:MM large
  *  │                        │
  *  ├────────────────────────┤ y=112
  *  │   Weather  (80 px)     │  Temp + condition label
  *  ├────────────────────────┤ y=192
- *  │   Tabs (32 px)         │  [Prayer] [Stocks] [Settings]
- *  ├────────────────────────┤ y=224
  *  │                        │
  *  │   Panel  (96 px)       │  Prayer times or Stock list
  *  │                        │
+ *  ├────────────────────────┤ y=288
+ *  │   Tabs (32 px)         │  [Prayer] [Stocks] [Settings]
  *  └────────────────────────┘ y=320
  *
  * Fonts used: TFT_eSPI built-in Free fonts (FreeSansBold24pt7b etc.)
@@ -58,10 +58,10 @@
 #define LAYOUT_CLOCK_H     88
 #define LAYOUT_WEATHER_Y   112
 #define LAYOUT_WEATHER_H   80
-#define LAYOUT_TABS_Y      192
-#define LAYOUT_TABS_H      32
-#define LAYOUT_PANEL_Y     224
+#define LAYOUT_PANEL_Y     192
 #define LAYOUT_PANEL_H     96
+#define LAYOUT_TABS_Y      288
+#define LAYOUT_TABS_H      32
 
 #define SCREEN_W  240
 #define SCREEN_H  320
@@ -168,23 +168,15 @@ static void drawStatusBar(bool wifiOk, const String& dateStr) {
 static void drawClock(const struct tm& t) {
     fillPanel(LAYOUT_CLOCK_Y, LAYOUT_CLOCK_H, C_BG);
 
-    char hmBuf[6], secBuf[3];
-    snprintf(hmBuf,  sizeof(hmBuf),  "%02d:%02d", t.tm_hour, t.tm_min);
-    snprintf(secBuf, sizeof(secBuf), "%02d",       t.tm_sec);
+    char hmBuf[6];
+    snprintf(hmBuf, sizeof(hmBuf), "%02d:%02d", t.tm_hour, t.tm_min);
 
-    // Large HH:MM
+    // Large HH:MM (centred)
     tft.setTextColor(C_TEXT_PRIMARY, C_BG);
     tft.setFreeFont(&FreeSansBold24pt7b);
     int tw = tft.textWidth(hmBuf);
     tft.setCursor((SCREEN_W - tw) / 2, LAYOUT_CLOCK_Y + 56);
     tft.print(hmBuf);
-
-    // Small seconds
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
-    tft.setTextColor(C_TEXT_DIM, C_BG);
-    tft.setCursor((SCREEN_W + tw) / 2 + 4, LAYOUT_CLOCK_Y + 42);
-    tft.print(secBuf);
 
     hline(LAYOUT_CLOCK_Y + LAYOUT_CLOCK_H - 1);
 }
@@ -412,9 +404,9 @@ static void drawStocksPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Settings panel (y=224..319)
+// Settings panel (y=192..287)
 // ---------------------------------------------------------------------------
-static void drawSettingsPanel(bool wifiOk, const String& ip) {
+static void drawSettingsPanel(bool wifiOk, const String& localAddr) {
     fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, C_PANEL);
 
     tft.setFreeFont(nullptr);
@@ -425,13 +417,13 @@ static void drawSettingsPanel(bool wifiOk, const String& ip) {
     const int ROW = 14;
 
     tft.setCursor(8, y); tft.print("WiFi:");
-    tft.setTextColor(wifiOk ? C_GREEN : C_RED, C_PANEL);
+    tft.setTextColor(wifiOk ? C_GREEN : C_GOLD, C_PANEL);
     tft.setCursor(60, y);
-    tft.print(wifiOk ? "Connected" : "AP mode (192.168.4.1)");
+    tft.print(wifiOk ? "Connected" : "AP Mode");
 
     y += ROW;
-    tft.setTextColor(C_TEXT_DIM, C_PANEL);
-    tft.setCursor(8, y); tft.print("IP: "); tft.print(ip);
+    tft.setTextColor(C_TEXT_PRIMARY, C_PANEL);
+    tft.setCursor(8, y); tft.print("http://"); tft.print(localAddr);
 
     y += ROW;
     tft.setTextColor(C_TEXT_SEC, C_PANEL);

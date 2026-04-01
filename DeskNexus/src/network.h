@@ -16,6 +16,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Preferences.h>
+#include <ESPmDNS.h>
 #include "config.h"
 
 // ---------------------------------------------------------------------------
@@ -191,6 +192,8 @@ static bool connectSTA() {
         Serial.print('.');
     }
     Serial.printf(" OK  IP=%s\n", WiFi.localIP().toString().c_str());
+    MDNS.begin("desknexus");
+    Serial.println("[Network] mDNS started: desknexus.local");
     return true;
 }
 
@@ -240,6 +243,15 @@ static bool isConnected() {
 static String ipAddress() {
     if (apActive)  return WiFi.softAPIP().toString();
     return WiFi.localIP().toString();
+}
+
+/*
+ * localAddress() — Human-friendly address for the device.
+ * Returns "desknexus.local" in STA mode (mDNS) or "192.168.4.1" in AP mode.
+ */
+static String localAddress() {
+    if (apActive) return "192.168.4.1";
+    return "desknexus.local";
 }
 
 /*
