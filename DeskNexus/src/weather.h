@@ -12,6 +12,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "config.h"
+#include "settings.h"
 
 namespace Weather {
 
@@ -70,24 +71,38 @@ static uint16_t iconColor(const String& code) {
 // Fetch (blocking, call from a task or between frames)
 // ---------------------------------------------------------------------------
 static bool fetch() {
-    if (String(OWM_API_KEY) == "YOUR_OPENWEATHERMAP_API_KEY") {
+    String apiKey = String(Settings::owmApiKey);
+    apiKey.trim();
+
+    if (apiKey.length() == 0 || apiKey == "YOUR_OPENWEATHERMAP_API_KEY") {
         Serial.println("[Weather] API key not configured — skipping fetch.");
         return false;
     }
 
     String url = "http://api.openweathermap.org/data/2.5/weather?q=";
-    url += String(OWM_CITY_NAME) + "," + String(OWM_COUNTRY);
-    url += "&appid=" + String(OWM_API_KEY);
-    url += "&units=" + String(OWM_UNITS);
+    url += String(Settings::city) + "," + String(Settings::country);
+    url += "&appid=" + apiKey;
+    url += "&units=" + String(Settings::owmUnits);
     url += "&lang="  + String(OWM_LANG);
 
     HTTPClient http;
     http.begin(url);
     http.setTimeout(8000);
+    Serial.printf("[Weather] Fetching city=%s country=%s\n", Settings::city, Settings::country);
     int code = http.GET();
 
     if (code != 200) {
-        Serial.printf("[Weather] HTTP error %d\n", code);
+        if (code < 0) {
+            Serial.printf("[Weather] Transport error %d (%s)\n",
+                          code, HTTPClient::errorToString(code).c_str());
+        } else {
+            Serial.printf("[Weather] HTTP error %d for city=%s country=%s\n",
+                          code, Settings::city, Settings::country);
+        }
+        if (code == 401) {
+            String body = http.getString();
+            Serial.printf("[Weather] Auth failure: %s\n", body.c_str());
+        }
         http.end();
         return false;
     }
@@ -120,6 +135,11 @@ static bool fetch() {
     current.valid     = true;
     current.fetchedAt = millis();
 
+    struct tm t;
+    if (getLocalTime(&t)) {
+        Settings::markWeatherFetched(t);
+    }
+
     Serial.printf("[Weather] %.1f° %s  %s\n",
                   current.temp, current.description.c_str(), current.iconCode.c_str());
     return true;
@@ -129,8 +149,13 @@ static bool fetch() {
 // Should we refresh? Call from loop().
 // ---------------------------------------------------------------------------
 static bool needsRefresh() {
+    // Always fetch if we have no data in RAM (e.g. fresh boot after prior session).
     if (!current.valid) return true;
-    return (millis() - current.fetchedAt) >= WEATHER_REFRESH_MS;
+
+    struct tm t;
+    if (!getLocalTime(&t)) return true;
+
+    return !Settings::isWeatherFetchedThisHour(t);
 }
 
 } // namespace Weather

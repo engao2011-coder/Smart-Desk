@@ -43,6 +43,14 @@
 #define NTP_DST_OFFSET_SEC   0       // Daylight-saving offset (0 if not used)
 
 // ---------------------------------------------------------------------------
+// Automatic city/timezone detection (runs on boot when WiFi is available)
+// ---------------------------------------------------------------------------
+#define AUTO_DETECT_LOCATION_TIME  true
+#define AUTO_DETECT_HTTP_TIMEOUT_MS  8000
+#define AUTO_DETECT_GEO_URL          "http://ipwho.is/"
+#define AUTO_DETECT_TZ_API_BASE      "http://worldtimeapi.org/api/timezone/"
+
+// ---------------------------------------------------------------------------
 // OpenWeatherMap
 // Register at https://openweathermap.org/api to get a free API key.
 // ---------------------------------------------------------------------------
@@ -52,8 +60,9 @@
 #define OWM_UNITS      "metric"   // "metric" (°C) or "imperial" (°F)
 #define OWM_LANG       "en"       // Language for weather description
 
-// How often to refresh weather (milliseconds)
-#define WEATHER_REFRESH_MS   (10UL * 60UL * 1000UL)   // 10 minutes
+// Weather refresh policy:
+// - fetched at most once per wall-clock hour
+// - successful fetch window is persisted in NVS
 
 // ---------------------------------------------------------------------------
 // Prayer Times (Aladhan API — https://aladhan.com/prayer-times-api)
@@ -65,28 +74,28 @@
 //  8 = Gulf Region, 16 = Turkey, 17 = Tehran …
 #define PRAYER_METHOD   4           // ← Makkah / Umm Al-Qura
 
-// How often to refresh prayer times (milliseconds)
-#define PRAYER_REFRESH_MS   (60UL * 60UL * 1000UL)   // 1 hour
+// Prayer refresh policy:
+// - fetched at most once per wall-clock day
+// - successful fetch window is persisted in NVS
 
 // ---------------------------------------------------------------------------
 // Stock Monitor
 // Up to MAX_STOCKS symbols will be displayed in rotation.
-// Uses the free Alpha Vantage API (https://www.alphavantage.co/support/#api-key).
+// Uses Yahoo Finance (no API key required).
+// Symbol format: TICKER.EXCHANGE  e.g. "IUSE.L", "IUSD.DE", "PPFB.DE"
 // ---------------------------------------------------------------------------
-#define AV_API_KEY      "YOUR_ALPHAVANTAGE_API_KEY"   // ← replace
 #define MAX_STOCKS      5
 
 // Stock symbols to monitor (fill up to MAX_STOCKS, leave extras as "")
 static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
-    "AAPL",
-    "GOOGL",
-    "MSFT",
-    "AMZN",
+    "IUSE.L",
+    "IUSD.DE",
+    "PPFB.DE",
+    "",
     "",
 };
 
 // How often to refresh stock data (milliseconds)
-// Note: Alpha Vantage free tier allows ~5 requests/minute / 500/day
 #define STOCK_REFRESH_MS   (5UL * 60UL * 1000UL)   // 5 minutes
 
 // Stock alert threshold — notify if price changes by this % since last refresh
@@ -98,6 +107,12 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 #define SCREEN_TIMEOUT_MS   60000   // Dim screen after 60 s of inactivity (0 = never)
 #define BACKLIGHT_DIM_DUTY  40      // Backlight PWM duty when dimmed (0-255)
 #define BACKLIGHT_FULL_DUTY 220     // Backlight PWM duty when active  (0-255)
+
+// ---------------------------------------------------------------------------
+// Auto-carousel (page rotation)
+// ---------------------------------------------------------------------------
+#define CAROUSEL_INTERVAL_MS  10000   // Auto-switch pages every 10 s
+#define CAROUSEL_PAUSE_MS     30000   // Pause carousel 30 s after manual touch
 
 // Touch calibration values for the CYD XPT2046 in portrait mode.
 // Run the TFT_eSPI Touch_calibrate example and paste results here.

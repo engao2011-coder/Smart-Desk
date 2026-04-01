@@ -16,6 +16,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include "config.h"
+#include "settings.h"
 
 namespace Prayer {
 
@@ -92,34 +93,51 @@ static int minutesUntilNext() {
 // ---------------------------------------------------------------------------
 // Fetch prayer times from Aladhan API (blocking)
 // ---------------------------------------------------------------------------
-static bool fetch() {
-    struct tm t;
-    if (!getLocalTime(&t)) {
-        Serial.println("[Prayer] Time not set — deferring fetch.");
-        return false;
-    }
-
+static bool fetchForTime(const struct tm& t) {
     char url[256];
     snprintf(url, sizeof(url),
              "http://api.aladhan.com/v1/timingsByCity?city=%s&country=%s&method=%d"
              "&day=%d&month=%d&year=%d",
-             PRAYER_CITY, PRAYER_COUNTRY, PRAYER_METHOD,
+             Settings::city, Settings::country, Settings::prayerMethod,
              t.tm_mday, t.tm_mon + 1, t.tm_year + 1900);
 
     HTTPClient http;
     http.begin(url);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.setTimeout(10000);
+    Serial.printf("[Prayer] Fetching city=%s country=%s date=%04d-%02d-%02d\n",
+                  Settings::city, Settings::country,
+                  t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
     int code = http.GET();
 
     if (code != 200) {
-        Serial.printf("[Prayer] HTTP error %d\n", code);
+        if (code < 0) {
+            Serial.printf("[Prayer] Transport error %d (%s)\n",
+                          code, HTTPClient::errorToString(code).c_str());
+        } else {
+            Serial.printf("[Prayer] HTTP error %d for city=%s country=%s\n",
+                          code, Settings::city, Settings::country);
+        }
         http.end();
         return false;
     }
 
-    // Response is ~2 KB; 2048 should be enough after filtering timings
-    StaticJsonDocument<2048> doc;
-    DeserializationError err = deserializeJson(doc, http.getStream());
+    // Aladhan response can be several KB; parse only timings to keep memory low.
+    StaticJsonDocument<160> filter;
+    JsonObject timingsFilter = filter["data"].createNestedObject("timings");
+    timingsFilter["Fajr"]    = true;
+    timingsFilter["Sunrise"] = true;
+    timingsFilter["Dhuhr"]   = true;
+    timingsFilter["Asr"]     = true;
+    timingsFilter["Maghrib"] = true;
+    timingsFilter["Isha"]    = true;
+
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(
+        doc,
+        http.getStream(),
+        DeserializationOption::Filter(filter)
+    );
     http.end();
 
     if (err) {
@@ -149,6 +167,7 @@ static bool fetch() {
 
     current.valid     = true;
     current.fetchedAt = millis();
+    Settings::markPrayerFetched(t);
     updateNextPrayer();
 
     Serial.printf("[Prayer] Fajr=%s  Dhuhr=%s  Maghrib=%s\n",
@@ -158,12 +177,31 @@ static bool fetch() {
     return true;
 }
 
+static bool fetch() {
+    struct tm t;
+    if (!getLocalTime(&t)) {
+        Serial.println("[Prayer] Time not set — deferring fetch.");
+        return false;
+    }
+    return fetchForTime(t);
+}
+
 // ---------------------------------------------------------------------------
 // Should we refresh? Call from loop().
 // ---------------------------------------------------------------------------
+static bool needsRefreshForTime(const struct tm& t) {
+    // Always fetch if we have no data in RAM (e.g. fresh boot after prior session).
+    if (!current.valid) return true;
+    return !Settings::isPrayerFetchedToday(t);
+}
+
 static bool needsRefresh() {
     if (!current.valid) return true;
-    return (millis() - current.fetchedAt) >= PRAYER_REFRESH_MS;
+
+    struct tm t;
+    if (!getLocalTime(&t)) return true;
+
+    return needsRefreshForTime(t);
 }
 
 } // namespace Prayer
