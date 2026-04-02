@@ -10,6 +10,7 @@
 #pragma once
 
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include "config.h"
 #include "settings.h"
@@ -34,6 +35,9 @@ struct Data {
 };
 
 static Data current;
+
+static unsigned long lastFetchAttemptMs  = 0;
+static constexpr unsigned long FETCH_RETRY_INTERVAL_MS = 60000;  // 60 s backoff after failure
 
 // ---------------------------------------------------------------------------
 // Map OWM icon code → simple emoji / text label for display
@@ -71,6 +75,7 @@ static uint16_t iconColor(const String& code) {
 // Fetch (blocking, call from a task or between frames)
 // ---------------------------------------------------------------------------
 static bool fetch() {
+    lastFetchAttemptMs = millis();
     String apiKey = String(Settings::owmApiKey);
     apiKey.trim();
 
@@ -79,14 +84,16 @@ static bool fetch() {
         return false;
     }
 
-    String url = "http://api.openweathermap.org/data/2.5/weather?q=";
+    String url = "https://api.openweathermap.org/data/2.5/weather?q=";
     url += String(Settings::city) + "," + String(Settings::country);
     url += "&appid=" + apiKey;
     url += "&units=" + String(Settings::owmUnits);
     url += "&lang="  + String(OWM_LANG);
 
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
-    http.begin(url);
+    http.begin(client, url);
     http.setTimeout(8000);
     Serial.printf("[Weather] Fetching city=%s country=%s\n", Settings::city, Settings::country);
     int code = http.GET();
@@ -149,11 +156,17 @@ static bool fetch() {
 // Should we refresh? Call from loop().
 // ---------------------------------------------------------------------------
 static bool needsRefresh() {
-    // Always fetch if we have no data in RAM (e.g. fresh boot after prior session).
-    if (!current.valid) return true;
+    if (!current.valid) {
+        // Backoff: avoid hammering the API after a failed fetch.
+        if (lastFetchAttemptMs > 0 &&
+            (millis() - lastFetchAttemptMs) < FETCH_RETRY_INTERVAL_MS) {
+            return false;
+        }
+        return true;
+    }
 
     struct tm t;
-    if (!getLocalTime(&t)) return true;
+    if (!getLocalTime(&t)) return false;  // no time yet — skip rather than retry immediately
 
     return !Settings::isWeatherFetchedThisHour(t);
 }

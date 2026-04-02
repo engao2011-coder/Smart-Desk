@@ -37,6 +37,11 @@ static char stockSymbols[MAX_STOCKS][24] = {
 // Timezone
 static long utcOffset = NTP_UTC_OFFSET_SEC;
 
+// UI theme preference (manual only)
+// true  => dark theme
+// false => light theme
+static bool themeDark = true;
+
 // Auto-detection metadata
 static bool autoDetectLastOk = false;
 static long autoDetectLastEpoch = 0;
@@ -52,6 +57,12 @@ static int weatherFetchHour  = -1;
 static int prayerFetchYear   = -1;
 static int prayerFetchMonth  = -1;
 static int prayerFetchDay    = -1;
+
+static int  prayerStateDayKey = -1;
+static int  prayerPrayedMask  = 0;
+static int  prayerSnoozeIndex = -1;
+static long prayerSnoozeUntil = 0;
+static int  prayerSnoozeCount = 0;
 
 // ---------------------------------------------------------------------------
 // Load from NVS (falls back to compiled defaults when key is absent)
@@ -73,6 +84,7 @@ static void load() {
     }
 
     utcOffset = prefs.getLong("utcOff", utcOffset);
+    themeDark = prefs.getBool("themeDark", themeDark);
 
     weatherFetchYear  = prefs.getInt("wFY", weatherFetchYear);
     weatherFetchMonth = prefs.getInt("wFM", weatherFetchMonth);
@@ -82,6 +94,12 @@ static void load() {
     prayerFetchYear   = prefs.getInt("pFY", prayerFetchYear);
     prayerFetchMonth  = prefs.getInt("pFM", prayerFetchMonth);
     prayerFetchDay    = prefs.getInt("pFD", prayerFetchDay);
+
+    prayerStateDayKey = prefs.getInt("pSDK", prayerStateDayKey);
+    prayerPrayedMask  = prefs.getInt("pMask", prayerPrayedMask);
+    prayerSnoozeIndex = prefs.getInt("pSnIx", prayerSnoozeIndex);
+    prayerSnoozeUntil = prefs.getLong("pSnTo", prayerSnoozeUntil);
+    prayerSnoozeCount = prefs.getInt("pSnCt", prayerSnoozeCount);
 
     autoDetectLastOk    = prefs.getBool("adOK", autoDetectLastOk);
     autoDetectLastEpoch = prefs.getLong("adTS", autoDetectLastEpoch);
@@ -114,6 +132,7 @@ static void save() {
     }
 
     prefs.putLong("utcOff", utcOffset);
+    prefs.putBool("themeDark", themeDark);
 
     prefs.putInt("wFY", weatherFetchYear);
     prefs.putInt("wFM", weatherFetchMonth);
@@ -123,6 +142,12 @@ static void save() {
     prefs.putInt("pFY", prayerFetchYear);
     prefs.putInt("pFM", prayerFetchMonth);
     prefs.putInt("pFD", prayerFetchDay);
+
+    prefs.putInt("pSDK", prayerStateDayKey);
+    prefs.putInt("pMask", prayerPrayedMask);
+    prefs.putInt("pSnIx", prayerSnoozeIndex);
+    prefs.putLong("pSnTo", prayerSnoozeUntil);
+    prefs.putInt("pSnCt", prayerSnoozeCount);
 
     prefs.putBool("adOK", autoDetectLastOk);
     prefs.putLong("adTS", autoDetectLastEpoch);
@@ -153,6 +178,7 @@ static void resetToDefaults() {
         strncpy(stockSymbols[i], defaults[i], sizeof(stockSymbols[i]) - 1);
     }
     utcOffset = NTP_UTC_OFFSET_SEC;
+    themeDark = true;
 
     weatherFetchYear  = -1;
     weatherFetchMonth = -1;
@@ -162,6 +188,12 @@ static void resetToDefaults() {
     prayerFetchYear   = -1;
     prayerFetchMonth  = -1;
     prayerFetchDay    = -1;
+
+    prayerStateDayKey = -1;
+    prayerPrayedMask  = 0;
+    prayerSnoozeIndex = -1;
+    prayerSnoozeUntil = 0;
+    prayerSnoozeCount = 0;
 
     autoDetectLastOk = false;
     autoDetectLastEpoch = 0;
@@ -186,7 +218,14 @@ static void markWeatherFetched(const tm& t) {
     weatherFetchMonth = t.tm_mon + 1;
     weatherFetchDay   = t.tm_mday;
     weatherFetchHour  = t.tm_hour;
-    save();
+    // Write only the 4 fetch-window keys to reduce NVS wear.
+    Preferences prefs;
+    prefs.begin("settings", false);
+    prefs.putInt("wFY", weatherFetchYear);
+    prefs.putInt("wFM", weatherFetchMonth);
+    prefs.putInt("wFD", weatherFetchDay);
+    prefs.putInt("wFH", weatherFetchHour);
+    prefs.end();
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +241,30 @@ static void markPrayerFetched(const tm& t) {
     prayerFetchYear  = t.tm_year + 1900;
     prayerFetchMonth = t.tm_mon + 1;
     prayerFetchDay   = t.tm_mday;
-    save();
+    // Write only the 3 fetch-window keys to reduce NVS wear.
+    Preferences prefs;
+    prefs.begin("settings", false);
+    prefs.putInt("pFY", prayerFetchYear);
+    prefs.putInt("pFM", prayerFetchMonth);
+    prefs.putInt("pFD", prayerFetchDay);
+    prefs.end();
+}
+
+static void savePrayerState(int dayKey, int prayedMask, int snoozeIndex, long snoozeUntil, int snoozeCount) {
+    prayerStateDayKey = dayKey;
+    prayerPrayedMask  = prayedMask;
+    prayerSnoozeIndex = snoozeIndex;
+    prayerSnoozeUntil = snoozeUntil;
+    prayerSnoozeCount = snoozeCount;
+    // Write only the 5 prayer-state keys to reduce NVS wear.
+    Preferences prefs;
+    prefs.begin("settings", false);
+    prefs.putInt("pSDK",  prayerStateDayKey);
+    prefs.putInt("pMask", prayerPrayedMask);
+    prefs.putInt("pSnIx", prayerSnoozeIndex);
+    prefs.putLong("pSnTo", prayerSnoozeUntil);
+    prefs.putInt("pSnCt", prayerSnoozeCount);
+    prefs.end();
 }
 
 } // namespace Settings

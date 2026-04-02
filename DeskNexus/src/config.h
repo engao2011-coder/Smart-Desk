@@ -27,6 +27,7 @@
 // which are then persisted to NVS (Preferences).
 // ---------------------------------------------------------------------------
 #define WIFI_CONNECT_TIMEOUT_MS  15000   // ms to wait for STA connection
+#define WIFI_SAVED_NETWORKS_MAX  5       // number of remembered Wi-Fi networks
 
 // Access-Point fallback settings (captive portal)
 #define AP_SSID      "DeskNexus-Setup"
@@ -78,6 +79,12 @@
 // - fetched at most once per wall-clock day
 // - successful fetch window is persisted in NVS
 
+#define PRAYER_PRE_ALERT_MINUTES  15
+#define PRAYER_SNOOZE_MINUTES     15
+#define PRAYER_MAX_SNOOZE_COUNT   3    // max snooze attempts per prayer per day
+#define PRAYER_REMINDER_MINUTES   30
+#define PRAYER_FULLSCREEN_MS      600000
+
 // ---------------------------------------------------------------------------
 // Stock Monitor
 // Up to MAX_STOCKS symbols will be displayed in rotation.
@@ -98,21 +105,23 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 // How often to refresh stock data (milliseconds)
 #define STOCK_REFRESH_MS   (5UL * 60UL * 1000UL)   // 5 minutes
 
-// Stock alert threshold — notify if price changes by this % since last refresh
-#define STOCK_ALERT_PCT   2.0f   // 2 %
+// Stock alert threshold — show gold dot if price changed by this % vs yesterday's close
+#define STOCK_ALERT_PCT         2.0f   // 2 %
+// Intra-fetch change threshold — switch to stocks page when price moves by this % since last fetch
+#define STOCK_INTRA_CHANGE_PCT  1.0f   // 1 %
 
 // ---------------------------------------------------------------------------
 // UI / Display behaviour
 // ---------------------------------------------------------------------------
-#define SCREEN_TIMEOUT_MS   60000   // Dim screen after 60 s of inactivity (0 = never)
-#define BACKLIGHT_DIM_DUTY  40      // Backlight PWM duty when dimmed (0-255)
-#define BACKLIGHT_FULL_DUTY 220     // Backlight PWM duty when active  (0-255)
+#define SCREEN_TIMEOUT_MS   90000   // Dim screen after 90 s of inactivity (0 = never)
+#define BACKLIGHT_DIM_DUTY  52      // Backlight PWM duty when dimmed (0-255)
+#define BACKLIGHT_FULL_DUTY 235     // Backlight PWM duty when active  (0-255)
 
 // ---------------------------------------------------------------------------
 // Auto-carousel (page rotation)
 // ---------------------------------------------------------------------------
-#define CAROUSEL_INTERVAL_MS  10000   // Auto-switch pages every 10 s
-#define CAROUSEL_PAUSE_MS     30000   // Pause carousel 30 s after manual touch
+#define CAROUSEL_INTERVAL_MS  5000   // Auto-switch pages every 5 s
+#define CAROUSEL_PAUSE_MS     45000   // Pause carousel 45 s after manual touch
 
 // Touch calibration values for the CYD XPT2046 in portrait mode.
 // Run the TFT_eSPI Touch_calibrate example and paste results here.

@@ -14,10 +14,12 @@
 #pragma once
 
 #include <WiFi.h>
+#include <DNSServer.h>
 #include <WebServer.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
 #include <time.h>
+#include <cstring>
 #include "config.h"
 #include "settings.h"
 #include "weather.h"
@@ -31,49 +33,204 @@
 namespace Network {
 
 static WebServer   server(80);
+static DNSServer   dnsServer;
 static Preferences prefs;
 static bool        staConnected = false;
 static bool        apActive     = false;
 static bool        serverRoutesRegistered = false;
 static bool        serverStarted = false;
 static bool        mdnsActive = false;
+static bool        dnsActive = false;
 
-// Persisted credentials
-static char savedSSID[64]     = {};
-static char savedPassword[64] = {};
+// CSRF token — generated each time the server starts, embedded in all forms.
+static char csrfToken[17] = {};
+
+static void generateCsrfToken() {
+    snprintf(csrfToken, sizeof(csrfToken), "%08lx%08lx",
+             (unsigned long)(uint32_t)esp_random(),
+             (unsigned long)(uint32_t)esp_random());
+}
+
+struct SavedNetwork {
+    char ssid[64];
+    char password[64];
+};
+
+// Persisted credentials (most recent first)
+static SavedNetwork savedNetworks[WIFI_SAVED_NETWORKS_MAX] = {};
+static int          savedNetworkCount = 0;
+
+static bool isSameSSID(const char* a, const char* b) {
+    return strncmp(a, b, sizeof(savedNetworks[0].ssid)) == 0;
+}
+
+static void clearSavedNetworks() {
+    memset(savedNetworks, 0, sizeof(savedNetworks));
+    savedNetworkCount = 0;
+}
+
+static void persistSavedNetworks() {
+    prefs.begin("wifi", false);  // read-write namespace
+    prefs.putInt("count", savedNetworkCount);
+
+    for (int i = 0; i < WIFI_SAVED_NETWORKS_MAX; i++) {
+        char ssidKey[8];
+        char passKey[8];
+        snprintf(ssidKey, sizeof(ssidKey), "ssid%d", i);
+        snprintf(passKey, sizeof(passKey), "pass%d", i);
+
+        if (i < savedNetworkCount && savedNetworks[i].ssid[0] != '\0') {
+            prefs.putString(ssidKey, savedNetworks[i].ssid);
+            prefs.putString(passKey, savedNetworks[i].password);
+        } else {
+            prefs.remove(ssidKey);
+            prefs.remove(passKey);
+        }
+    }
+
+    // Keep legacy key pair in sync with top-priority network for compatibility.
+    if (savedNetworkCount > 0) {
+        prefs.putString("ssid", savedNetworks[0].ssid);
+        prefs.putString("password", savedNetworks[0].password);
+    } else {
+        prefs.remove("ssid");
+        prefs.remove("password");
+    }
+
+    prefs.end();
+}
+
+static void moveNetworkToFront(int index) {
+    if (index <= 0 || index >= savedNetworkCount) return;
+    SavedNetwork chosen = savedNetworks[index];
+    for (int i = index; i > 0; i--) {
+        savedNetworks[i] = savedNetworks[i - 1];
+    }
+    savedNetworks[0] = chosen;
+}
+
+static bool addOrUpdateNetwork(const char* ssid, const char* password) {
+    if (!ssid || ssid[0] == '\0') return false;
+
+    int foundIndex = -1;
+    for (int i = 0; i < savedNetworkCount; i++) {
+        if (isSameSSID(savedNetworks[i].ssid, ssid)) {
+            foundIndex = i;
+            break;
+        }
+    }
+
+    if (foundIndex >= 0) {
+        strncpy(savedNetworks[foundIndex].password, password ? password : "", sizeof(savedNetworks[foundIndex].password) - 1);
+        savedNetworks[foundIndex].password[sizeof(savedNetworks[foundIndex].password) - 1] = '\0';
+        moveNetworkToFront(foundIndex);
+        return true;
+    }
+
+    if (savedNetworkCount < WIFI_SAVED_NETWORKS_MAX) {
+        savedNetworkCount++;
+    }
+
+    for (int i = savedNetworkCount - 1; i > 0; i--) {
+        savedNetworks[i] = savedNetworks[i - 1];
+    }
+
+    strncpy(savedNetworks[0].ssid, ssid, sizeof(savedNetworks[0].ssid) - 1);
+    savedNetworks[0].ssid[sizeof(savedNetworks[0].ssid) - 1] = '\0';
+    strncpy(savedNetworks[0].password, password ? password : "", sizeof(savedNetworks[0].password) - 1);
+    savedNetworks[0].password[sizeof(savedNetworks[0].password) - 1] = '\0';
+
+    return true;
+}
 
 // ---------------------------------------------------------------------------
 // Load credentials from NVS
 // ---------------------------------------------------------------------------
 static void loadCredentials() {
+    clearSavedNetworks();
+
     prefs.begin("wifi", true);   // read-only namespace
-    prefs.getString("ssid",     savedSSID,     sizeof(savedSSID));
-    prefs.getString("password", savedPassword, sizeof(savedPassword));
+
+    if (prefs.isKey("count")) {
+        int count = prefs.getInt("count", 0);
+        if (count < 0) count = 0;
+        if (count > WIFI_SAVED_NETWORKS_MAX) count = WIFI_SAVED_NETWORKS_MAX;
+
+        for (int i = 0; i < count; i++) {
+            char ssidKey[8];
+            char passKey[8];
+            snprintf(ssidKey, sizeof(ssidKey), "ssid%d", i);
+            snprintf(passKey, sizeof(passKey), "pass%d", i);
+
+            prefs.getString(ssidKey, savedNetworks[savedNetworkCount].ssid,
+                            sizeof(savedNetworks[savedNetworkCount].ssid));
+            prefs.getString(passKey, savedNetworks[savedNetworkCount].password,
+                            sizeof(savedNetworks[savedNetworkCount].password));
+
+            if (savedNetworks[savedNetworkCount].ssid[0] != '\0') {
+                savedNetworkCount++;
+            }
+        }
+    }
+
+    // Legacy migration path (single network keys).
+    if (savedNetworkCount == 0) {
+        char legacySSID[64] = {};
+        char legacyPassword[64] = {};
+        prefs.getString("ssid", legacySSID, sizeof(legacySSID));
+        prefs.getString("password", legacyPassword, sizeof(legacyPassword));
+        if (legacySSID[0] != '\0') {
+            addOrUpdateNetwork(legacySSID, legacyPassword);
+        }
+    }
+
     prefs.end();
+
+    if (savedNetworkCount > 0) {
+        // Persist to v2 keys after successful legacy load.
+        persistSavedNetworks();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Save credentials to NVS
 // ---------------------------------------------------------------------------
 static void saveCredentials(const char* ssid, const char* password) {
-    prefs.begin("wifi", false);  // read-write namespace
-    prefs.putString("ssid",     ssid);
-    prefs.putString("password", password);
-    prefs.end();
-    strncpy(savedSSID,     ssid,     sizeof(savedSSID)     - 1);
-    strncpy(savedPassword, password, sizeof(savedPassword) - 1);
+    if (!addOrUpdateNetwork(ssid, password)) return;
+    persistSavedNetworks();
 }
 
 // ---------------------------------------------------------------------------
 // HTML helpers
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// HTML-escape a string to prevent XSS when embedding user/network data in HTML
+// ---------------------------------------------------------------------------
+static String htmlEscape(const String& s) {
+    String out;
+    out.reserve(s.length());
+    for (unsigned int i = 0; i < s.length(); i++) {
+        char c = s[i];
+        switch (c) {
+            case '&':  out += "&amp;";  break;
+            case '<':  out += "&lt;";   break;
+            case '>':  out += "&gt;";   break;
+            case '"':  out += "&quot;"; break;
+            case '\'': out += "&#39;";  break;
+            default:   out += c;        break;
+        }
+    }
+    return out;
+}
+
 static String wifiScanHTML() {
     // Scan for available networks
     int n = WiFi.scanNetworks();
     String options = "";
     for (int i = 0; i < n; i++) {
-        options += "<option value=\"" + WiFi.SSID(i) + "\">" +
-                   WiFi.SSID(i) + " (" + String(WiFi.RSSI(i)) + " dBm)</option>\n";
+        String ssidSafe = htmlEscape(WiFi.SSID(i));
+        options += "<option value=\"" + ssidSafe + "\">" +
+                   ssidSafe + " (" + String(WiFi.RSSI(i)) + " dBm)</option>\n";
     }
     return options;
 }
@@ -103,6 +260,10 @@ static String portalPage() {
 <div class="card">
   <h2>&#128338; DeskNexus Setup</h2>
   <form method="POST" action="/save">
+    <input type="hidden" name="csrf" value=")rawhtml";
+    html += String(csrfToken);
+    html += R"rawhtml(">";
+    html += R"rawhtml(
     <label for="ssid">Wi-Fi Network</label>
     <select name="ssid" id="ssid">
 )rawhtml";
@@ -136,7 +297,10 @@ display:flex;justify-content:center;align-items:center;min-height:100vh}</style>
 
 static String statusPage() {
     String ip   = WiFi.localIP().toString();
-    String ssid = String(savedSSID);
+    String ssid = WiFi.SSID();
+    if (ssid.length() == 0 && savedNetworkCount > 0) {
+        ssid = String(savedNetworks[0].ssid);
+    }
     uint32_t uptimeSec = millis() / 1000;
     uint32_t h = uptimeSec / 3600;
     uint32_t m = (uptimeSec % 3600) / 60;
@@ -225,6 +389,9 @@ static String settingsPage() {
 <div class="card">
   <h2>&#9881; DeskNexus Settings</h2>
   <form method="POST" action="/save-settings">
+    <input type="hidden" name="csrf" value=")rawhtml";
+    html += String(csrfToken);
+    html += R"rawhtml(">
 
     <h3>Location</h3>
     <div class="row">
@@ -287,6 +454,17 @@ static String settingsPage() {
         html += R"rawhtml(
         </p>
 
+        <h3>Theme</h3>
+        <label for="theme">Display Theme</label>
+        <select id="theme" name="theme">
+            <option value="dark")rawhtml";
+        if (Settings::themeDark) html += " selected";
+        html += R"rawhtml(>Dark</option>
+            <option value="light")rawhtml";
+        if (!Settings::themeDark) html += " selected";
+        html += R"rawhtml(>Light</option>
+        </select>
+
     <h3>Stocks</h3>)rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
@@ -307,7 +485,9 @@ static String settingsPage() {
     <input type="submit" value="Save Settings">
   </form>
   <div class="link"><a href="/">&#8592; Back to Status</a></div>
-  <a class="rst" href="/reset-settings" onclick="return confirm('Reset all settings to defaults?')">Reset to Defaults</a>
+  <a class="rst" href="/reset-settings?csrf=)rawhtml";
+    html += String(csrfToken);
+    html += R"rawhtml(" onclick="return confirm('Reset all settings to defaults?')">Reset to Defaults</a>
 </div>
 </body>
 </html>
@@ -345,6 +525,10 @@ static void handleSettings() {
 }
 
 static void handleSaveSettings() {
+    if (server.arg("csrf") != String(csrfToken)) {
+        server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
+        return;
+    }
     // City / Country
     String v = server.arg("city");
     if (v.length() > 0 && v.length() < sizeof(Settings::city))
@@ -366,6 +550,11 @@ static void handleSaveSettings() {
     // UTC offset
     long utc = server.arg("utc").toInt();
     if (utc >= -43200 && utc <= 50400) Settings::utcOffset = utc;
+
+    // Manual theme
+    v = server.arg("theme");
+    if (v == "dark") Settings::themeDark = true;
+    else if (v == "light") Settings::themeDark = false;
 
     Settings::autoDetectLastOk = false;
     Settings::autoDetectLastEpoch = time(nullptr);
@@ -404,6 +593,10 @@ static void handleSaveSettings() {
 }
 
 static void handleResetSettings() {
+    if (server.arg("csrf") != String(csrfToken)) {
+        server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
+        return;
+    }
     Settings::resetToDefaults();
     server.sendHeader("Location", "/settings", true);
     server.send(302, "text/plain", "");
@@ -414,6 +607,10 @@ static void handleSetup() {
 }
 
 static void handleSave() {
+    if (server.arg("csrf") != String(csrfToken)) {
+        server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
+        return;
+    }
     String ssid = server.arg("ssid");
     String pass = server.arg("pass");
 
@@ -425,6 +622,15 @@ static void handleSave() {
     server.send(200, "text/html", savedPage());
     delay(2000);
     ESP.restart();
+}
+
+static void handleCaptiveProbe() {
+    if (apActive) {
+        server.sendHeader("Location", "http://192.168.4.1/", true);
+        server.send(302, "text/plain", "");
+    } else {
+        server.send(204, "text/plain", "");
+    }
 }
 
 // Redirect all unknown paths to the portal (captive-portal behaviour)
@@ -442,12 +648,16 @@ static void handleNotFound() {
 // ---------------------------------------------------------------------------
 static void startServer() {
     if (!serverRoutesRegistered) {
+        generateCsrfToken();  // new token per server (re)start
         server.on("/",               HTTP_GET,  handleRoot);
         server.on("/setup",          HTTP_GET,  handleSetup);
         server.on("/save",           HTTP_POST, handleSave);
         server.on("/settings",       HTTP_GET,  handleSettings);
         server.on("/save-settings",  HTTP_POST, handleSaveSettings);
         server.on("/reset-settings", HTTP_GET,  handleResetSettings);
+        server.on("/generate_204",   HTTP_GET,  handleCaptiveProbe);
+        server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
+        server.on("/ncsi.txt",       HTTP_GET,  handleCaptiveProbe);
         server.onNotFound(handleNotFound);
         serverRoutesRegistered = true;
     }
@@ -473,8 +683,16 @@ static void startAP() {
     // Set AP_PASSWORD in config.h to a non-empty string for a secured AP.
     WiFi.softAP(AP_SSID, strlen(AP_PASSWORD) > 0 ? AP_PASSWORD : nullptr);
 
+    if (dnsActive) {
+        dnsServer.stop();
+        dnsActive = false;
+    }
+    dnsServer.start(53, "*", WiFi.softAPIP());
+    dnsActive = true;
+
     startServer();
 
+    staConnected = false;
     apActive = true;
     Serial.printf("[Network] AP mode: SSID=%s  IP=%s\n",
                   AP_SSID, WiFi.softAPIP().toString().c_str());
@@ -485,37 +703,65 @@ static void startAP() {
 // Returns true on success.
 // ---------------------------------------------------------------------------
 static bool connectSTA() {
-    if (strlen(savedSSID) == 0) return false;
+    if (savedNetworkCount <= 0) return false;
 
     WiFi.mode(WIFI_STA);
-    WiFi.begin(savedSSID, savedPassword);
-    Serial.printf("[Network] Connecting to \"%s\"", savedSSID);
 
-    unsigned long start = millis();
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - start >= WIFI_CONNECT_TIMEOUT_MS) {
-            Serial.println(" timeout.");
-            return false;
+    for (int i = 0; i < savedNetworkCount; i++) {
+        const char* ssid = savedNetworks[i].ssid;
+        const char* pass = savedNetworks[i].password;
+
+        if (ssid[0] == '\0') continue;
+
+        WiFi.disconnect(true);
+        delay(100);
+        WiFi.begin(ssid, pass);
+        Serial.printf("[Network] Connecting to \"%s\"", ssid);
+
+        unsigned long start = millis();
+        while (WiFi.status() != WL_CONNECTED) {
+            if (millis() - start >= WIFI_CONNECT_TIMEOUT_MS) {
+                Serial.println(" timeout.");
+                break;
+            }
+            delay(250);
+            Serial.print('.');
         }
-        delay(250);
-        Serial.print('.');
-    }
-    Serial.printf(" OK  IP=%s\n", WiFi.localIP().toString().c_str());
-    if (mdnsActive) {
-        MDNS.end();
-        mdnsActive = false;
+
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf(" OK  IP=%s\n", WiFi.localIP().toString().c_str());
+            if (i > 0) {
+                moveNetworkToFront(i);
+                persistSavedNetworks();
+            }
+
+            if (dnsActive) {
+                dnsServer.stop();
+                dnsActive = false;
+            }
+
+            if (mdnsActive) {
+                MDNS.end();
+                mdnsActive = false;
+            }
+
+            if (MDNS.begin("desknexus")) {
+                MDNS.addService("http", "tcp", 80);
+                mdnsActive = true;
+                Serial.println("[Network] mDNS started: desknexus.local");
+            } else {
+                Serial.println("[Network] mDNS start failed.");
+            }
+
+            startServer();
+            staConnected = true;
+            apActive = false;
+            return true;
+        }
     }
 
-    if (MDNS.begin("desknexus")) {
-        MDNS.addService("http", "tcp", 80);
-        mdnsActive = true;
-        Serial.println("[Network] mDNS started: desknexus.local");
-    } else {
-        Serial.println("[Network] mDNS start failed.");
-    }
-
-    startServer();
-    return true;
+    Serial.println("[Network] No saved networks connected.");
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +793,9 @@ static bool begin() {
  */
 static void handle() {
     server.handleClient();
+    if (apActive && dnsActive) {
+        dnsServer.processNextRequest();
+    }
 }
 
 /*
@@ -581,8 +830,11 @@ static void reconnect() {
     if (apActive) return;   // managed by portal
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[Network] WiFi lost — reconnecting...");
-        WiFi.disconnect();
-        connectSTA();
+        WiFi.disconnect(true);
+        if (!connectSTA()) {
+            Serial.println("[Network] Reconnect failed — switching to AP mode.");
+            startAP();
+        }
     }
 }
 

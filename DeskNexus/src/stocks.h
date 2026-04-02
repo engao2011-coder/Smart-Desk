@@ -29,6 +29,7 @@ struct Quote {
     float  change         = 0.0f;     // absolute change
     float  changePct      = 0.0f;     // percentage change
     float  prevClose      = 0.0f;
+    float  prevFetchPrice = 0.0f;     // price at the previous successful fetch
     float  open           = 0.0f;
     float  high           = 0.0f;
     float  low            = 0.0f;
@@ -121,6 +122,7 @@ static bool fetchOne(int idx) {
     JsonVariant q = result["indicators"]["quote"][0];
 
     Quote& quote = quotes[idx];
+    quote.prevFetchPrice = quote.valid ? quote.price : 0.0f;  // capture before overwrite
     strncpy(quote.symbol, sym, sizeof(quote.symbol) - 1);
     quote.price     = price;
     quote.prevClose = prevClose;
