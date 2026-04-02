@@ -116,26 +116,31 @@ static bool detectAndApply() {
         return false;
     }
 
-    if (geo.city.length() < sizeof(Settings::city)) {
-        strncpy(Settings::city, geo.city.c_str(), sizeof(Settings::city) - 1);
-        Settings::city[sizeof(Settings::city) - 1] = '\0';
-    }
-
-    if (geo.country.length() > 0 && geo.country.length() < sizeof(Settings::country)) {
-        geo.country.toUpperCase();
-        strncpy(Settings::country, geo.country.c_str(), sizeof(Settings::country) - 1);
-        Settings::country[sizeof(Settings::country) - 1] = '\0';
-    }
-
     Settings::utcOffset = detectedOffset;
 
-    String status = "OK " + geo.city + " UTC " + String(detectedOffset);
+    if (!Settings::cityManual) {
+        if (geo.city.length() < sizeof(Settings::city)) {
+            strncpy(Settings::city, geo.city.c_str(), sizeof(Settings::city) - 1);
+            Settings::city[sizeof(Settings::city) - 1] = '\0';
+        }
+
+        if (geo.country.length() > 0 && geo.country.length() < sizeof(Settings::country)) {
+            geo.country.toUpperCase();
+            strncpy(Settings::country, geo.country.c_str(), sizeof(Settings::country) - 1);
+            Settings::country[sizeof(Settings::country) - 1] = '\0';
+        }
+
+        Serial.printf("[AutoDetect] city=%s country=%s utc=%ld tz=%s\n",
+                      Settings::city, Settings::country,
+                      Settings::utcOffset, geo.timezoneId.c_str());
+    } else {
+        Serial.printf("[AutoDetect] City locked by user (%s) — skipping city update. utc=%ld tz=%s\n",
+                      Settings::city, Settings::utcOffset, geo.timezoneId.c_str());
+    }
+
+    String status = "OK " + String(Settings::city) + " UTC " + String(detectedOffset);
     setStatus(true, status);
     Settings::save();
-
-    Serial.printf("[AutoDetect] city=%s country=%s utc=%ld tz=%s\n",
-                  Settings::city, Settings::country,
-                  Settings::utcOffset, geo.timezoneId.c_str());
     return true;
 #else
     setStatus(false, "Auto-detect disabled");

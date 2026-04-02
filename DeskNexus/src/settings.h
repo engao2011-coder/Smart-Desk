@@ -42,6 +42,9 @@ static long utcOffset = NTP_UTC_OFFSET_SEC;
 // false => light theme
 static bool themeDark = true;
 
+// When true, auto-detect will NOT overwrite city/country (user set it manually)
+static bool cityManual = false;
+
 // Auto-detection metadata
 static bool autoDetectLastOk = false;
 static long autoDetectLastEpoch = 0;
@@ -106,10 +109,11 @@ static void load() {
     if (prefs.isKey("adMsg")) {
         prefs.getString("adMsg", autoDetectStatus, sizeof(autoDetectStatus));
     }
+    cityManual = prefs.getBool("cityM", cityManual);
 
     prefs.end();
-    Serial.printf("[Settings] Loaded — city=%s  country=%s  method=%d  utc=%ld\n",
-                  city, country, prayerMethod, utcOffset);
+    Serial.printf("[Settings] Loaded — city=%s  country=%s  method=%d  utc=%ld  cityManual=%d\n",
+                  city, country, prayerMethod, utcOffset, (int)cityManual);
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +156,7 @@ static void save() {
     prefs.putBool("adOK", autoDetectLastOk);
     prefs.putLong("adTS", autoDetectLastEpoch);
     prefs.putString("adMsg", autoDetectStatus);
+    prefs.putBool("cityM", cityManual);
 
     prefs.end();
     Serial.println("[Settings] Saved to NVS.");
@@ -199,6 +204,7 @@ static void resetToDefaults() {
     autoDetectLastEpoch = 0;
     strncpy(autoDetectStatus, "Never run", sizeof(autoDetectStatus) - 1);
     autoDetectStatus[sizeof(autoDetectStatus) - 1] = '\0';
+    cityManual = false;
 
     Serial.println("[Settings] Reset to compiled defaults.");
 }

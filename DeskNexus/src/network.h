@@ -408,6 +408,16 @@ static String settingsPage() {
     html += R"rawhtml(">
       </div>
     </div>
+    <div class="row">
+      <div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" name="autoCity" value="1")rawhtml";
+    if (!Settings::cityManual) html += " checked";
+    html += R"rawhtml(>
+          Auto-detect city from IP (uncheck to lock manual city)
+        </label>
+      </div>
+    </div>
 
     <div class="row">
       <div>
@@ -531,8 +541,14 @@ static void handleSaveSettings() {
     }
     // City / Country
     String v = server.arg("city");
-    if (v.length() > 0 && v.length() < sizeof(Settings::city))
+    if (v.length() > 0 && v.length() < sizeof(Settings::city)) {
         strncpy(Settings::city, v.c_str(), sizeof(Settings::city) - 1);
+        Settings::cityManual = true;  // user set city manually — lock auto-detect
+    }
+
+    // "Auto city" checkbox — if present and checked, clear the manual lock
+    if (server.hasArg("autoCity") && server.arg("autoCity") == "1")
+        Settings::cityManual = false;
 
     v = server.arg("country");
     if (v.length() > 0 && v.length() < sizeof(Settings::country))
