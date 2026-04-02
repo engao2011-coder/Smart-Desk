@@ -19,6 +19,7 @@ struct GeoInfo {
     String city;
     String country;
     String timezoneId;
+    long   utcOffsetSec = 0;
 };
 
 static bool getJson(const String& url, JsonDocument& doc) {
@@ -62,31 +63,16 @@ static bool fetchGeo(GeoInfo& out) {
         return false;
     }
 
+    long offset = doc["timezone"]["offset"] | LONG_MIN;
+    if (offset == LONG_MIN || offset < -43200 || offset > 50400) {
+        Serial.printf("[AutoDetect] Geo lookup missing or invalid UTC offset: %ld\n", offset);
+        return false;
+    }
+    out.utcOffsetSec = offset;
+
     return true;
 }
 
-static bool fetchUtcOffset(const String& timezoneId, long& utcOffsetSec) {
-    String url = String(AUTO_DETECT_TZ_API_BASE) + timezoneId;
-    StaticJsonDocument<1024> doc;
-    if (!getJson(url, doc)) return false;
-
-    long rawOffset = doc["raw_offset"] | LONG_MIN;
-    long dstOffset = doc["dst_offset"] | LONG_MIN;
-
-    if (rawOffset == LONG_MIN || dstOffset == LONG_MIN) {
-        Serial.println("[AutoDetect] Timezone response missing offsets.");
-        return false;
-    }
-
-    long total = rawOffset + dstOffset;
-    if (total < -43200 || total > 50400) {
-        Serial.printf("[AutoDetect] Timezone offset out of range: %ld\n", total);
-        return false;
-    }
-
-    utcOffsetSec = total;
-    return true;
-}
 
 static void setStatus(bool ok, const String& msg) {
     Settings::autoDetectLastOk = ok;
@@ -109,12 +95,7 @@ static bool detectAndApply() {
         return false;
     }
 
-    long detectedOffset = 0;
-    if (!fetchUtcOffset(geo.timezoneId, detectedOffset)) {
-        setStatus(false, "Timezone lookup failed");
-        Settings::save();
-        return false;
-    }
+    long detectedOffset = geo.utcOffsetSec;
 
     Settings::utcOffset = detectedOffset;
 
