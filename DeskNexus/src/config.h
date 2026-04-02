@@ -120,7 +120,7 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 // ---------------------------------------------------------------------------
 // Auto-carousel (page rotation)
 // ---------------------------------------------------------------------------
-#define CAROUSEL_INTERVAL_MS  5000   // Auto-switch pages every 5 s
+#define CAROUSEL_INTERVAL_MS  30000  // Auto-switch pages every 30 s
 #define CAROUSEL_PAUSE_MS     45000   // Pause carousel 45 s after manual touch
 
 // Touch calibration values for the CYD XPT2046 in portrait mode.

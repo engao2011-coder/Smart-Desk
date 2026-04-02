@@ -626,7 +626,6 @@ static void drawPrayerPanel() {
             case Prayer::ROW_UPCOMING:
                 rowBg = theme.highlightBg;
                 fg = theme.textPri;
-                statusText = "NEXT";
                 edgeColor = theme.gold;
                 break;
             case Prayer::ROW_PENDING:
@@ -958,11 +957,6 @@ static void drawStocksPanel() {
 static unsigned long bannerExpiry = 0;
 static char bannerText[64] = {};
 
-static void showBanner(const char* text, uint32_t durationMs = 5000) {
-    strncpy(bannerText, text, sizeof(bannerText) - 1);
-    bannerExpiry = millis() + durationMs;
-}
-
 static void drawBannerIfActive() {
     if (azanScreenActive) return;
     if (millis() >= bannerExpiry) return;
@@ -976,6 +970,12 @@ static void drawBannerIfActive() {
 
     // Keep global text state predictable for other widgets.
     tft.setTextSize(1);
+}
+
+static void showBanner(const char* text, uint32_t durationMs = 5000) {
+    strncpy(bannerText, text, sizeof(bannerText) - 1);
+    bannerExpiry = millis() + durationMs;
+    drawBannerIfActive();  // paint immediately, no tick delay
 }
 
 // ---------------------------------------------------------------------------

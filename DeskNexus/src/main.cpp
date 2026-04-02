@@ -58,7 +58,6 @@ static XPT2046_Touchscreen touch(TOUCH_CS_PIN, TOUCH_IRQ_PIN);
 
 // ── Timing state ──────────────────────────────────────────────────────────
 static unsigned long lastMinuteTick  = 0;   // 60 s — clock & status redraw
-static unsigned long lastLightTick   = 0;   // 10 s — carousel, prayer countdown, banner
 static unsigned long lastStockFetch  = 0;   // stock round-robin
 static unsigned long lastNetCheck    = 0;   // WiFi reconnect check
 static unsigned long lastThemeCheck  = 0;   // theme auto-switch (60 s)
@@ -287,27 +286,6 @@ void loop() {
 
     unsigned long now = millis();
 
-    // ── Lightweight tick (~10 s) — carousel + prayer countdown + banner ───
-    if (now - lastLightTick >= 10000) {
-        lastLightTick = now;
-
-        UI::updatePrayerUiState();
-
-        // Auto-advance carousel
-        if (UI::shouldAutoAdvance()) {
-            UI::advancePage();
-        }
-
-        // Refresh prayer countdown & panel
-        Prayer::updateNextPrayer();
-        struct tm t;
-        if (getLocalTime(&t)) {
-            UI::updateClock(t);
-        }
-        UI::updatePanel();
-        UI::drawBannerIfActive();
-    }
-
     // ── Minute tick (60 s) — clock, status bar, theme ─────────────────────
     if (now - lastMinuteTick >= 60000 || UI::needsRedraw || firstDraw) {
         if (now - lastMinuteTick >= 60000) lastMinuteTick = now;
@@ -384,11 +362,15 @@ void loop() {
         }
     }
 
-    // ── Prayer reminder state (check every 30 s) ──────────────────────────
+    // ── Prayer reminder + carousel + azan-expiry (every 30 s) ─────────────
     static unsigned long lastPrayerAlert = 0;
     if ((now - lastPrayerAlert) >= 30000) {
         lastPrayerAlert = now;
+        UI::updatePrayerUiState();   // expire azan screen if needed
         processPrayerReminderEvent();
+        if (UI::shouldAutoAdvance()) {
+            UI::advancePage();       // sets needsRedraw=true
+        }
     }
 
     delay(10);  // yield to FreeRTOS scheduler
