@@ -110,6 +110,7 @@ static long epochForLocalTime(const struct tm& t) {
 // calls syncDailyState, and loadPersistentState is called from setup()).
 static bool isPrayed(int index);
 static int  activePendingIndexForTime(const struct tm& t);
+static void updateNextPrayer();
 
 static void persistState() {
     Settings::savePrayerState(
@@ -252,6 +253,7 @@ static bool markPrayed(int prayerIndex) {
     }
     persistState();
     Serial.printf("[Prayer] Marked prayed: %s\n", current.prayers[prayerIndex].name);
+    updateNextPrayer();  // recalculate immediately so next-prayer display is correct
     return true;
 }
 

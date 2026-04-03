@@ -306,6 +306,8 @@ void loop() {
             }
         }
 
+        if (timeOk) Prayer::updateNextPrayer();  // keep nextIndex fresh every minute
+
         if (UI::needsRedraw || firstDraw) {
             if (timeOk) {
                 UI::redraw(wifiOk, ipAddr, t, date);
