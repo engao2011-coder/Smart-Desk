@@ -7,6 +7,7 @@
 #pragma once
 
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <limits.h>
 #include <time.h>
@@ -23,8 +24,10 @@ struct GeoInfo {
 };
 
 static bool getJson(const String& url, JsonDocument& doc) {
+    WiFiClientSecure client;
+    client.setInsecure();
     HTTPClient http;
-    http.begin(url);
+    http.begin(client, url);
     http.setTimeout(AUTO_DETECT_HTTP_TIMEOUT_MS);
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 

@@ -98,6 +98,14 @@ static const Theme THEME_LIGHT = {
 
 namespace UI {
 
+// ── Azan screen layout constants (shared by drawAzanScreen + handleTouch) ──
+static constexpr int AZAN_BUTTON_MARGIN = 68;   // height reserved for bottom buttons
+static constexpr int AZAN_CONTENT_H     = 132;  // text-content block height
+static constexpr int AZAN_START_Y       = (SCREEN_H - AZAN_BUTTON_MARGIN - AZAN_CONTENT_H) / 2;
+// X-dismiss hit zone: top-right corner of the card (y < AZAN_START_Y, x > SCREEN_W-40)
+static constexpr int AZAN_DISMISS_X     = SCREEN_W - 40;
+static constexpr int AZAN_DISMISS_Y_MAX = AZAN_START_Y;  // tap must be above content start
+
 // ── State ──────────────────────────────────────────────────────────────────
 static TFT_eSPI tft = TFT_eSPI();
 static Theme    theme       = THEME_DARK;
@@ -191,6 +199,8 @@ static void wake() {
 
 static void checkDim() {
     if (SCREEN_TIMEOUT_MS == 0) return;
+    // Keep screen on while a prayer is pending — user needs to respond
+    if (Prayer::pendingPrayerIndex() >= 0) return;
     if (!dimmed && (millis() - lastTouchMs) >= SCREEN_TIMEOUT_MS) {
         setDimmed(true);
     }
@@ -310,13 +320,21 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
     pauseCarousel();
 
     if (azanScreenActive) {
-        int buttonTop = SCREEN_H - 68;
-        if (ty >= buttonTop) {
+        int buttonTop = SCREEN_H - AZAN_BUTTON_MARGIN;
+        if (ty >= (uint16_t)buttonTop) {
+            // Button row — Prayed (left) or Snooze (right)
+            int bW = SCREEN_W / 2 - 18;
             if (tx < SCREEN_W / 2) {
+                // Flash Prayed button
+                tft.fillRoundRect(12, buttonTop, bW, 48, 10, theme.textDim);
+                delay(60);
                 if (Prayer::markPrayed(azanPrayerIndex)) {
                     dismissAzanScreen();
                 }
             } else {
+                // Flash Snooze button
+                tft.fillRoundRect(SCREEN_W / 2 + 6, buttonTop, bW, 48, 10, theme.textDim);
+                delay(60);
                 if (!Prayer::isSnoozed(azanPrayerIndex) && Prayer::snoozePendingPrayer(azanPrayerIndex)) {
                     dismissAzanScreen();
                 }
@@ -324,16 +342,29 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             needsRedraw = true;
             return true;
         }
-        dismissAzanScreen();
+        // X dismiss zone — top-right corner of card, above content
+        if ((int)ty < AZAN_DISMISS_Y_MAX && (int)tx >= AZAN_DISMISS_X) {
+            dismissAzanScreen();
+            return true;
+        }
+        // Any other tap on azan screen is intentionally ignored
         return true;
     }
 
     if (hasPrayerFooterActions()) {
         const int footerTop = SCREEN_H - 50;
         if (ty >= footerTop) {
+            // Visual flash feedback before action
+            const int bW = SCREEN_W / 2 - 18;
+            const int fy = SCREEN_H - 48 - 4;  // matches drawPrayerPanel footer geometry
+            const int bH = 40;
             if (tx < SCREEN_W / 2) {
+                tft.fillRoundRect(14, fy, bW, bH, 8, theme.textDim);
+                delay(60);
                 Prayer::markPendingPrayed();
             } else {
+                tft.fillRoundRect(SCREEN_W / 2 + 4, fy, bW, bH, 8, theme.textDim);
+                delay(60);
                 int fp = Prayer::pendingPrayerIndex();
                 if (fp >= 0 && !Prayer::isSnoozed(fp)) {
                     Prayer::snoozePendingPrayer(fp);
@@ -341,6 +372,21 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             }
             needsRedraw = true;
             return true;
+        }
+    }
+
+    // Tap a MISSED prayer row to retroactively mark it as prayed
+    if (activePage == PAGE_PRAYER && Prayer::current.valid &&
+        (int)ty >= LAYOUT_PANEL_Y && (int)ty < (SCREEN_H - 50)) {
+        const int ROW_H  = 26;
+        const int START_Y = LAYOUT_PANEL_Y + 14;
+        int tappedIdx = ((int)ty - START_Y) / ROW_H;
+        if (tappedIdx >= 0 && tappedIdx < Prayer::PRAYER_COUNT) {
+            if (Prayer::rowStateForIndex(tappedIdx) == Prayer::ROW_MISSED) {
+                Prayer::markPrayed(tappedIdx);
+                needsRedraw = true;
+                return true;  // consume — don't fall through to page switch
+            }
         }
     }
 
@@ -387,11 +433,16 @@ static void drawStatusBar(bool wifiOk, const String& dateStr, const String& ipSt
     for (int i = 0; i < PAGE_COUNT; i++) {
         int cx = dotX + i * DOT_GAP + DOT_R;
         int cy = 11;
+        bool allowed = isPageAllowed(i);
         if (i == activePage) {
             tft.fillCircle(cx, cy, DOT_R, theme.accent);
             tft.drawCircle(cx, cy, DOT_R + 2, theme.panel);
-        } else {
+        } else if (allowed) {
             tft.drawCircle(cx, cy, DOT_R, theme.textDim);
+        } else {
+            // Page unavailable (e.g. Stocks while offline) — faint hollow dot
+            tft.fillCircle(cx, cy, DOT_R, theme.panel);   // erase interior
+            tft.drawCircle(cx, cy, DOT_R - 1, theme.separator);
         }
     }
 
@@ -539,13 +590,16 @@ static void drawHero(const struct tm& t) {
     const int rZoneX = 146;
 
     if (!Weather::current.valid) {
+        const char* line2 = "loading...";
+        if (Weather::current.fetchState == Weather::WEATHER_NO_KEY)    line2 = "No API key";
+        if (Weather::current.fetchState == Weather::WEATHER_NET_ERROR) line2 = "Net error";
         tft.setFreeFont(nullptr);
         tft.setTextSize(1);
         tft.setTextColor(theme.textDim, theme.panel);
         tft.setCursor(rZoneX, cardY + 28);
         tft.print("Weather");
         tft.setCursor(rZoneX, cardY + 40);
-        tft.print("loading...");
+        tft.print(line2);
     } else {
         const Weather::Data& w = Weather::current;
         uint16_t wAccent = Weather::iconColor(w.iconCode);
@@ -619,6 +673,7 @@ static void drawPrayerPanel() {
 
         uint16_t rowBg = theme.panel;
         uint16_t fg = theme.textSec;
+        char snoozeLabelBuf[14] = "";
         const char* statusText = "";
         uint16_t edgeColor = theme.separator;
 
@@ -634,12 +689,19 @@ static void drawPrayerPanel() {
                 statusText = "DUE";
                 edgeColor = theme.accent;
                 break;
-            case Prayer::ROW_SNOOZED:
+            case Prayer::ROW_SNOOZED: {
                 rowBg = theme.highlightBg;
                 fg = theme.textPri;
-                statusText = "SNZD";
                 edgeColor = theme.textSec;
+                char untilBuf[6] = {};
+                if (Prayer::snoozedUntilText(untilBuf, sizeof(untilBuf))) {
+                    snprintf(snoozeLabelBuf, sizeof(snoozeLabelBuf), "SNZD%s", untilBuf);
+                } else {
+                    strncpy(snoozeLabelBuf, "SNZD", sizeof(snoozeLabelBuf));
+                }
+                statusText = snoozeLabelBuf;
                 break;
+            }
             case Prayer::ROW_DONE:
                 fg = theme.green;
                 edgeColor = theme.green;
@@ -744,12 +806,19 @@ static void drawAzanScreen() {
 
     // Vertically centered content group: title(28) + gap(12) + name(38) + gap(8) + time(20) + gap(10) + instruction(16) = ~132
     const int buttonH = 48;
-    const int buttonMargin = 68;
-    const int contentH = 132;
-    const int startY = (SCREEN_H - buttonMargin - contentH) / 2;
+    const int buttonMargin = AZAN_BUTTON_MARGIN;
+    const int contentH = AZAN_CONTENT_H;
+    const int startY = AZAN_START_Y;
 
     // Card behind content
     tft.fillRoundRect(12, startY - 16, SCREEN_W - 24, contentH + 32, 16, theme.panel);
+
+    // X dismiss button — top-right corner of card
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(SCREEN_W - 30, startY - 11);
+    tft.print("[X]");
 
     // "Prayer Time" title
     tft.setFreeFont(&FreeSansBold18pt7b);

@@ -451,10 +451,37 @@ static String settingsPage() {
       </div>
     </div>
 
-    <label for="utc">UTC Offset (seconds)</label>
-    <input type="number" id="utc" name="utc" value=")rawhtml";
-    html += String(Settings::utcOffset);
-    html += R"rawhtml(">
+    <label for="utc">Timezone (UTC Offset)</label>
+    <select id="utc" name="utc">)rawhtml";
+
+    // Common UTC offsets: label → seconds.  Non-standard half/quarter-hour zones included.
+    struct { long sec; const char* label; } tzOpts[] = {
+        {-43200, "UTC-12"}, {-39600, "UTC-11"}, {-36000, "UTC-10"},
+        {-34200, "UTC-9:30"}, {-32400, "UTC-9"}, {-28800, "UTC-8"},
+        {-25200, "UTC-7"}, {-21600, "UTC-6"}, {-18000, "UTC-5"},
+        {-16200, "UTC-4:30"}, {-14400, "UTC-4"}, {-12600, "UTC-3:30"},
+        {-10800, "UTC-3"}, {-7200, "UTC-2"}, {-3600, "UTC-1"},
+        {0,      "UTC+0"},
+        {3600,   "UTC+1"},  {7200,   "UTC+2"},  {10800,  "UTC+3"},
+        {12600,  "UTC+3:30"}, {14400, "UTC+4"}, {16200, "UTC+4:30"},
+        {18000,  "UTC+5"},  {19800,  "UTC+5:30"}, {20700, "UTC+5:45"},
+        {21600,  "UTC+6"},  {23400,  "UTC+6:30"}, {25200, "UTC+7"},
+        {28800,  "UTC+8"},  {31500,  "UTC+8:45"}, {32400, "UTC+9"},
+        {34200,  "UTC+9:30"}, {36000, "UTC+10"}, {37800, "UTC+10:30"},
+        {39600,  "UTC+11"}, {43200, "UTC+12"},  {45900, "UTC+12:45"},
+        {46800,  "UTC+13"}, {50400, "UTC+14"},
+    };
+    bool matchedTz = false;
+    for (auto& tz : tzOpts) {
+        html += "<option value=\"" + String(tz.sec) + "\"";
+        if (Settings::utcOffset == tz.sec) { html += " selected"; matchedTz = true; }
+        html += ">" + String(tz.label) + "</option>\n";
+    }
+    // If the current value doesn't match any standard entry, show it as Custom
+    if (!matchedTz) {
+        html += "<option value=\"" + String(Settings::utcOffset) + "\" selected>Custom (" + String(Settings::utcOffset) + " s)</option>\n";
+    }
+    html += R"rawhtml(    </select>
         <p style="font-size:.8rem;color:#9bd;line-height:1.4;margin:6px 0 0">
             Auto-detect status: )rawhtml";
         html += String(Settings::autoDetectStatus);

@@ -163,6 +163,7 @@ static void processPrayerReminderEvent() {
             break;
         case Prayer::REMINDER_DUE:
             snprintf(msg, sizeof(msg), "%s is due now", name);
+            UI::wake();  // ensure screen is on when Azan fires
             UI::showBanner(msg, 10000);
             UI::showAzanScreen(event.prayerIndex);
             break;
@@ -174,6 +175,7 @@ static void processPrayerReminderEvent() {
             break;
         case Prayer::REMINDER_SNOOZE_EXPIRED:
             snprintf(msg, sizeof(msg), "%s snooze ended", name);
+            UI::wake();  // wake display when snooze expires
             UI::showBanner(msg, 10000);
             UI::activePage = PAGE_PRAYER;
             UI::needsRedraw = true;

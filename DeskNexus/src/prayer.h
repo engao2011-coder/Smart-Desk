@@ -198,6 +198,7 @@ static bool isSnoozed(int index) {
 }
 
 static int activePendingIndexForTime(const struct tm& t) {
+    if (!current.valid) return -1;  // guard: pray data not yet loaded
     int nowMin = t.tm_hour * 60 + t.tm_min;
     int latestDue = -1;
     for (int i = 0; i < PRAYER_COUNT; i++) {
@@ -217,6 +218,7 @@ static int pendingPrayerIndex() {
 }
 
 static int upcomingPrayerIndexForTime(const struct tm& t) {
+    if (!current.valid) return -1;  // guard: prayer data not yet loaded
     if (activePendingIndexForTime(t) >= 0) return -1;
 
     int nowMin = t.tm_hour * 60 + t.tm_min;

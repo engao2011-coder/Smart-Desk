@@ -20,6 +20,13 @@ namespace Weather {
 // ---------------------------------------------------------------------------
 // Data model
 // ---------------------------------------------------------------------------
+enum FetchState {
+    WEATHER_NEVER,      // never attempted
+    WEATHER_NO_KEY,     // API key missing or is the placeholder default
+    WEATHER_NET_ERROR,  // HTTP error or JSON parse failure
+    WEATHER_OK,         // last fetch succeeded
+};
+
 struct Data {
     float  temp         = 0.0f;   // Temperature in configured units (°C or °F)
     float  feelsLike    = 0.0f;   // Feels-like temperature in same units
@@ -31,6 +38,7 @@ struct Data {
     String iconCode     = "01d";  // OWM icon code (e.g. "01d" = clear sky day)
     String cityName     = OWM_CITY_NAME;
     bool   valid        = false;
+    FetchState fetchState = WEATHER_NEVER;
     unsigned long fetchedAt = 0;  // millis() when last fetched
 };
 
@@ -81,6 +89,7 @@ static bool fetch() {
 
     if (apiKey.length() == 0 || apiKey == "YOUR_OPENWEATHERMAP_API_KEY") {
         Serial.println("[Weather] API key not configured — skipping fetch.");
+        current.fetchState = WEATHER_NO_KEY;
         return false;
     }
 
@@ -109,6 +118,9 @@ static bool fetch() {
         if (code == 401) {
             String body = http.getString();
             Serial.printf("[Weather] Auth failure: %s\n", body.c_str());
+            current.fetchState = WEATHER_NO_KEY;  // 401 = bad key
+        } else {
+            current.fetchState = WEATHER_NET_ERROR;
         }
         http.end();
         return false;
@@ -122,6 +134,7 @@ static bool fetch() {
 
     if (err) {
         Serial.printf("[Weather] JSON parse error: %s\n", err.c_str());
+        current.fetchState = WEATHER_NET_ERROR;
         return false;
     }
 
@@ -141,6 +154,7 @@ static bool fetch() {
 
     current.valid     = true;
     current.fetchedAt = millis();
+    current.fetchState = WEATHER_OK;
 
     struct tm t;
     if (getLocalTime(&t)) {

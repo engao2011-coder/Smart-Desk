@@ -48,7 +48,7 @@
 // ---------------------------------------------------------------------------
 #define AUTO_DETECT_LOCATION_TIME  true
 #define AUTO_DETECT_HTTP_TIMEOUT_MS  8000
-#define AUTO_DETECT_GEO_URL          "http://ipwho.is/"
+#define AUTO_DETECT_GEO_URL          "https://ipwho.is/"
 
 // ---------------------------------------------------------------------------
 // OpenWeatherMap
