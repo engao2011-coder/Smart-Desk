@@ -150,7 +150,11 @@ static void syncDailyState(const struct tm& t) {
         if (nowEpoch >= current.snoozeUntilEpoch) {
             // Flag for a soft SNOOZE_EXPIRED event so the next pollReminderEvent()
             // emits a banner only; the Azan screen re-fires on the subsequent pass.
-            current.snoozedPrayerIndex = -1;
+            // NOTE: snoozedPrayerIndex is intentionally kept so the orphaned-snooze
+            // block below can detect when a *different* prayer becomes pending and
+            // reset snoozeCount — preventing "No More" from bleeding into un-snoozed
+            // later prayers. isSnoozed() validates via snoozeUntilEpoch > 0, so it
+            // correctly returns false after expiry regardless.
             current.snoozeUntilEpoch = 0;
             current.snoozeJustExpired = true;
             persistState();

@@ -83,8 +83,8 @@ static void persistSavedNetworks() {
             prefs.putString(ssidKey, savedNetworks[i].ssid);
             prefs.putString(passKey, savedNetworks[i].password);
         } else {
-            prefs.remove(ssidKey);
-            prefs.remove(passKey);
+            if (prefs.isKey(ssidKey)) prefs.remove(ssidKey);
+            if (prefs.isKey(passKey)) prefs.remove(passKey);
         }
     }
 

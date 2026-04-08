@@ -232,11 +232,15 @@ void setup() {
         }
 
         UI::showSplashStatus("Detecting loc...");
+        long offsetBeforeDetect = Settings::utcOffset;
         if (!LocationTime::detectAndApply()) {
             Serial.println("[AutoDetect] Using saved city/timezone values.");
         } else {
-            // Re-apply detected UTC offset so local-time based modules use updated zone.
-            TimeSync::apply(Settings::utcOffset, true);
+            // Re-apply configTime only when the detected offset actually differs from
+            // the previously saved value — avoids duplicate APB callback registration.
+            if (Settings::utcOffset != offsetBeforeDetect) {
+                TimeSync::apply(Settings::utcOffset, true);
+            }
             ntpSynced = TimeSync::readLocalTimeStable(t);
         }
 
