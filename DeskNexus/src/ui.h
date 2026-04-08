@@ -1031,11 +1031,23 @@ static void drawBannerIfActive() {
     if (millis() >= bannerExpiry) return;
     tft.fillRect(0, LAYOUT_PANEL_Y, SCREEN_W, 28, theme.accent);
     tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
     tft.setTextColor(theme.textPri, theme.accent);
+
+    // Adaptive size: drop to size 1 if text would overflow the banner width.
+    tft.setTextSize(2);
     int tw = tft.textWidth(bannerText);
-    tft.setCursor((SCREEN_W - tw) / 2, LAYOUT_PANEL_Y + 6);
+    int cursorY = LAYOUT_PANEL_Y + 6;
+    if (tw > SCREEN_W - 8) {
+        tft.setTextSize(1);
+        tw = tft.textWidth(bannerText);
+        cursorY = LAYOUT_PANEL_Y + 10;
+    }
+
+    // Disable wrap so an unexpectedly long string clips rather than overflowing the banner rect.
+    tft.setTextWrap(false);
+    tft.setCursor((SCREEN_W - tw) / 2, cursorY);
     tft.print(bannerText);
+    tft.setTextWrap(true);
 
     // Keep global text state predictable for other widgets.
     tft.setTextSize(1);
