@@ -44,7 +44,29 @@ struct Data {
 
 static Data current;
 
+// ---------------------------------------------------------------------------
+// 5-day forecast data
+// ---------------------------------------------------------------------------
+struct DayForecast {
+    char   dayName[4]  = "";      // "Mon", "Tue", etc.
+    float  tempHi      = -999.0f;
+    float  tempLo      =  999.0f;
+    String iconCode    = "01d";   // dominant weather icon for the day
+    bool   valid       = false;
+};
+
+struct ForecastData {
+    DayForecast days[FORECAST_DAYS];
+    int   dayCount       = 0;
+    bool  valid          = false;
+    bool  alertTriggered = false;  // significant-change alert flag
+    unsigned long fetchedAt = 0;
+};
+
+static ForecastData forecast;
+
 static unsigned long lastFetchAttemptMs  = 0;
+static unsigned long lastForecastFetchMs = 0;
 static constexpr unsigned long FETCH_RETRY_INTERVAL_MS = 60000;  // 60 s backoff after failure
 
 // ---------------------------------------------------------------------------
@@ -183,6 +205,203 @@ static bool needsRefresh() {
     if (!getLocalTime(&t)) return false;  // no time yet — skip rather than retry immediately
 
     return !Settings::isWeatherFetchedThisHour(t);
+}
+
+// ---------------------------------------------------------------------------
+// 5-day forecast fetch (OWM free /data/2.5/forecast — 3-hour intervals)
+// ---------------------------------------------------------------------------
+static bool fetchForecast() {
+    lastForecastFetchMs = millis();
+    String apiKey = String(Settings::owmApiKey);
+    apiKey.trim();
+
+    if (apiKey.length() == 0 || apiKey == "YOUR_OPENWEATHERMAP_API_KEY") {
+        return false;
+    }
+
+    String url = "https://api.openweathermap.org/data/2.5/forecast?q=";
+    url += String(Settings::city) + "," + String(Settings::country);
+    url += "&appid=" + apiKey;
+    url += "&units=" + String(Settings::owmUnits);
+    url += "&cnt=40";
+
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(10000);
+    Serial.println("[Forecast] Fetching 5-day forecast...");
+    int code = http.GET();
+
+    if (code != 200) {
+        Serial.printf("[Forecast] HTTP error %d\n", code);
+        http.end();
+        return false;
+    }
+
+    // Use a filter to keep only the fields we need — saves ~10KB of heap
+    StaticJsonDocument<256> filter;
+    filter["list"][0]["dt"] = true;
+    filter["list"][0]["main"]["temp_min"] = true;
+    filter["list"][0]["main"]["temp_max"] = true;
+    filter["list"][0]["weather"][0]["icon"] = true;
+
+    // The filtered response needs ~6KB for up to 40 entries
+    DynamicJsonDocument doc(6144);
+    DeserializationError err = deserializeJson(doc, http.getStream(),
+                                               DeserializationOption::Filter(filter));
+    http.end();
+
+    if (err) {
+        Serial.printf("[Forecast] JSON parse error: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray list = doc["list"].as<JsonArray>();
+    if (list.isNull() || list.size() == 0) {
+        Serial.println("[Forecast] Empty list");
+        return false;
+    }
+    Serial.printf("[Forecast] Parsed %d entries\n", list.size());
+
+    // ── Group 3-hour intervals by calendar day ──
+    // We track up to FORECAST_DAYS days. Day boundaries use the dt timestamp.
+    struct DayBucket {
+        int dayOfYear = -1;
+        float hi = -999.0f;
+        float lo =  999.0f;
+        char dayName[4] = "";
+        // Track dominant icon: count occurrences per icon prefix (2 chars)
+        char icons[8][4] = {};    // up to 8 distinct prefixes
+        int  iconCounts[8] = {};
+        int  iconN = 0;
+        char bestIcon[8] = "01d"; // fallback
+    };
+    DayBucket buckets[FORECAST_DAYS];
+    int bucketCount = 0;
+
+    // Get today's day-of-year to skip "today" entries
+    struct tm now;
+    if (!getLocalTime(&now)) {
+        Serial.println("[Forecast] No local time");
+        return false;
+    }
+    int todayDOY = now.tm_yday;
+
+    for (JsonObject entry : list) {
+        time_t dt = entry["dt"] | 0L;
+        if (dt == 0) continue;
+        struct tm entryTm;
+        localtime_r(&dt, &entryTm);
+        int doy = entryTm.tm_yday;
+
+        // Skip entries for "today"
+        if (doy == todayDOY) continue;
+
+        // Find or create bucket for this day
+        int bIdx = -1;
+        for (int b = 0; b < bucketCount; b++) {
+            if (buckets[b].dayOfYear == doy) { bIdx = b; break; }
+        }
+        if (bIdx < 0) {
+            if (bucketCount >= FORECAST_DAYS) continue;
+            bIdx = bucketCount++;
+            buckets[bIdx].dayOfYear = doy;
+            // Day name
+            strftime(buckets[bIdx].dayName, sizeof(buckets[bIdx].dayName), "%a", &entryTm);
+        }
+
+        float tMin = entry["main"]["temp_min"] | -999.0f;
+        float tMax = entry["main"]["temp_max"] | -999.0f;
+        if (tMax > buckets[bIdx].hi) buckets[bIdx].hi = tMax;
+        if (tMin < buckets[bIdx].lo) buckets[bIdx].lo = tMin;
+
+        // Icon tracking
+        const char* icon = entry["weather"][0]["icon"] | "01d";
+        char prefix[3] = { icon[0], icon[1], '\0' };
+        bool found = false;
+        for (int k = 0; k < buckets[bIdx].iconN; k++) {
+            if (strcmp(buckets[bIdx].icons[k], prefix) == 0) {
+                buckets[bIdx].iconCounts[k]++;
+                found = true;
+                break;
+            }
+        }
+        if (!found && buckets[bIdx].iconN < 8) {
+            int n = buckets[bIdx].iconN++;
+            strncpy(buckets[bIdx].icons[n], prefix, 3);
+            buckets[bIdx].iconCounts[n] = 1;
+        }
+    }
+
+    // ── Build forecast result ──
+    forecast.dayCount = bucketCount;
+    forecast.alertTriggered = false;
+
+    for (int b = 0; b < bucketCount; b++) {
+        // Pick dominant icon (most frequent prefix) + append "d" for day variant
+        int bestIdx = 0;
+        for (int k = 1; k < buckets[b].iconN; k++) {
+            if (buckets[b].iconCounts[k] > buckets[b].iconCounts[bestIdx]) bestIdx = k;
+        }
+        if (buckets[b].iconN > 0) {
+            snprintf(buckets[b].bestIcon, sizeof(buckets[b].bestIcon),
+                     "%sd", buckets[b].icons[bestIdx]);
+        }
+
+        forecast.days[b].valid   = true;
+        forecast.days[b].tempHi  = buckets[b].hi;
+        forecast.days[b].tempLo  = buckets[b].lo;
+        forecast.days[b].iconCode = String(buckets[b].bestIcon);
+        strncpy(forecast.days[b].dayName, buckets[b].dayName, 3);
+        forecast.days[b].dayName[3] = '\0';
+
+        Serial.printf("[Forecast] %s: %.0f/%.0f %s\n",
+                      forecast.days[b].dayName,
+                      forecast.days[b].tempHi, forecast.days[b].tempLo,
+                      forecast.days[b].iconCode.c_str());
+
+        // ── Alert detection ──
+        // 1) Significant temp swing vs current weather
+        if (current.valid) {
+            if (fabsf(buckets[b].hi - current.temp) >= FORECAST_TEMP_SWING_ALERT ||
+                fabsf(buckets[b].lo - current.temp) >= FORECAST_TEMP_SWING_ALERT) {
+                forecast.alertTriggered = true;
+            }
+        }
+        // 2) Condition shift: rain/storm/snow incoming when current is clear/cloudy
+        if (current.valid) {
+            bool currentClear = current.iconCode.startsWith("01") ||
+                                current.iconCode.startsWith("02") ||
+                                current.iconCode.startsWith("03") ||
+                                current.iconCode.startsWith("04");
+            String fIcon = forecast.days[b].iconCode;
+            bool forecastBad = fIcon.startsWith("09") || fIcon.startsWith("10") ||
+                               fIcon.startsWith("11") || fIcon.startsWith("13");
+            if (currentClear && forecastBad) {
+                forecast.alertTriggered = true;
+            }
+        }
+    }
+
+    // Clear unused days
+    for (int b = bucketCount; b < FORECAST_DAYS; b++) {
+        forecast.days[b].valid = false;
+    }
+
+    forecast.valid     = (bucketCount > 0);
+    forecast.fetchedAt = millis();
+
+    Serial.printf("[Forecast] %d days fetched, alert=%d\n",
+                  bucketCount, forecast.alertTriggered);
+    return forecast.valid;
+}
+
+// ---------------------------------------------------------------------------
+// Forecast alert check
+// ---------------------------------------------------------------------------
+static bool hasForecastAlert() {
+    return forecast.valid && forecast.alertTriggered;
 }
 
 } // namespace Weather

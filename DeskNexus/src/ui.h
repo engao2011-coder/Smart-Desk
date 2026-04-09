@@ -92,9 +92,10 @@ static const Theme THEME_LIGHT = {
 #define SCREEN_H  320
 
 // Page indices (no Settings page on display)
-#define PAGE_PRAYER  0
-#define PAGE_STOCKS  1
-#define PAGE_COUNT   2
+#define PAGE_PRAYER    0
+#define PAGE_FORECAST  1
+#define PAGE_STOCKS    2
+#define PAGE_COUNT     3
 
 namespace UI {
 
@@ -214,6 +215,9 @@ static bool isPageAllowed(int page) {
     if (page == PAGE_STOCKS) {
         return Network::isConnected();
     }
+    if (page == PAGE_FORECAST) {
+        return Network::isConnected() && Weather::forecast.valid;
+    }
     return true;
 }
 
@@ -228,12 +232,12 @@ static int nextAllowedPage(int fromPage, int direction) {
     return PAGE_PRAYER;
 }
 
-// Like nextAllowedPage but also skips PAGE_STOCKS — stocks only appears via event trigger
+// Like nextAllowedPage but also skips PAGE_STOCKS and PAGE_FORECAST — they only appear via event trigger
 static int nextCarouselPage(int fromPage, int direction) {
     int page = fromPage;
     for (int i = 0; i < PAGE_COUNT; i++) {
         page = (page + direction + PAGE_COUNT) % PAGE_COUNT;
-        if (isPageAllowed(page) && page != PAGE_STOCKS) {
+        if (isPageAllowed(page) && page != PAGE_STOCKS && page != PAGE_FORECAST) {
             return page;
         }
     }
@@ -905,6 +909,107 @@ static void drawAzanScreen() {
 }
 
 // ---------------------------------------------------------------------------
+// Forecast panel (y=124..319) — 5-day weather forecast matching hero style
+// ---------------------------------------------------------------------------
+static void drawForecastPanel() {
+    fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
+    tft.setFreeFont(nullptr);
+
+    const int cardX = 8, cardW = SCREEN_W - 16;
+    const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
+    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
+
+    if (!Weather::forecast.valid || Weather::forecast.dayCount == 0) {
+        tft.setTextSize(2);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(20, LAYOUT_PANEL_Y + 88);
+        tft.print("Forecast N/A");
+        return;
+    }
+
+    // Header
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    const char* hdr = "5-Day Forecast";
+    int hw = tft.textWidth(hdr);
+    tft.setCursor(cardX + (cardW - hw) / 2, cardY + 4);
+    tft.print(hdr);
+
+    const int ROW_H   = 34;
+    const int START_Y  = cardY + 16;
+    const char* unit   = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
+    int shown = 0;
+
+    for (int i = 0; i < Weather::forecast.dayCount && shown < FORECAST_DAYS; i++) {
+        const Weather::DayForecast& d = Weather::forecast.days[i];
+        if (!d.valid) continue;
+
+        int ry = START_Y + shown * ROW_H;
+        uint16_t rowBg = theme.panel;
+        uint16_t accent = Weather::iconColor(d.iconCode);
+
+        // Left edge bar (5px) coloured by weather condition
+        tft.fillRect(cardX + 6, ry, 5, ROW_H - 4, accent);
+
+        // Weather icon (24×24) — centered vertically in the row
+        int iconCx = cardX + 30;
+        int iconCy = ry + ROW_H / 2 - 1;
+        drawWeatherIcon(iconCx, iconCy, d.iconCode);
+
+        // Day name (e.g. "Mon")
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(2);
+        tft.setTextColor(theme.textPri, rowBg);
+        tft.setCursor(cardX + 50, ry + 2);
+        tft.print(d.dayName);
+
+        // Condition label below day name
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textSec, rowBg);
+        tft.setCursor(cardX + 50, ry + 20);
+        tft.print(Weather::iconLabel(d.iconCode));
+
+        // Hi / Lo temps — right-aligned
+        char hiBuf[10], loBuf[10];
+        snprintf(hiBuf, sizeof(hiBuf), "%.0f%s", d.tempHi, unit);
+        snprintf(loBuf, sizeof(loBuf), "%.0f%s", d.tempLo, unit);
+
+        // Hi temp in accent colour (matches hero style)
+        tft.setTextSize(2);
+        tft.setTextColor(accent, rowBg);
+        int hiW = tft.textWidth(hiBuf);
+        tft.setCursor(cardX + cardW - hiW - 12, ry + 2);
+        tft.print(hiBuf);
+
+        // Lo temp in dim colour, smaller
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, rowBg);
+        int loW = tft.textWidth(loBuf);
+        tft.setCursor(cardX + cardW - loW - 12, ry + 22);
+        tft.print(loBuf);
+
+        // Separator line between rows
+        if (shown < Weather::forecast.dayCount - 1) {
+            tft.drawFastHLine(cardX + 16, ry + ROW_H - 2, cardW - 32, theme.separator);
+        }
+        shown++;
+    }
+
+    // Touch affordance chevrons
+    tft.setTextSize(2);
+    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print("<");
+    int rw = tft.textWidth(">");
+    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print(">");
+
+    // Reset text state
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+}
+
+// ---------------------------------------------------------------------------
 // Stocks panel (y=124..319) — expanded, readable fonts, no zebra striping
 // ---------------------------------------------------------------------------
 static void drawStocksPanel() {
@@ -1097,8 +1202,9 @@ static void redraw(bool wifiOk, const String& ipAddr,
     drawHero(t);
 
     switch (activePage) {
-        case PAGE_PRAYER:  drawPrayerPanel();  break;
-        case PAGE_STOCKS:  drawStocksPanel();  break;
+        case PAGE_PRAYER:   drawPrayerPanel();   break;
+        case PAGE_FORECAST: drawForecastPanel(); break;
+        case PAGE_STOCKS:   drawStocksPanel();   break;
     }
 
     drawBannerIfActive();
@@ -1132,8 +1238,9 @@ static void updatePanel() {
     }
     coerceAllowedActivePage();
     switch (activePage) {
-        case PAGE_PRAYER:  drawPrayerPanel();  break;
-        case PAGE_STOCKS:  drawStocksPanel();  break;
+        case PAGE_PRAYER:   drawPrayerPanel();   break;
+        case PAGE_FORECAST: drawForecastPanel(); break;
+        case PAGE_STOCKS:   drawStocksPanel();   break;
     }
 }
 

@@ -146,6 +146,20 @@ static void checkStockAlerts() {
     }
 }
 
+// ── Helper: check weather forecast alerts ─────────────────────────────────
+static void checkWeatherForecastAlerts() {
+    if (!Network::isConnected()) return;
+    if (!Weather::forecast.valid) return;
+    if (UI::activePage == PAGE_FORECAST) return;  // already showing
+
+    if (Weather::hasForecastAlert()) {
+        Serial.println("[Forecast] Alert triggered -> switching to forecast page");
+        UI::pauseCarousel();
+        UI::activePage = PAGE_FORECAST;
+        UI::needsRedraw = true;
+    }
+}
+
 // ── Helper: poll prayer reminder state ────────────────────────────────────
 static void processPrayerReminderEvent() {
     Prayer::ReminderEvent event = Prayer::pollReminderEvent();
@@ -252,6 +266,7 @@ void setup() {
         UI::showSplashStatus("Loading weather..");
         if (Weather::needsRefresh()) {
             Weather::fetch();
+            Weather::fetchForecast();
         }
 
         UI::showSplashStatus("Loading prayers..");
@@ -357,6 +372,16 @@ void loop() {
         if (Weather::needsRefresh()) {
             if (Weather::fetch()) {
                 UI::updateWeather();
+                // Fetch forecast alongside current weather
+                if (Weather::fetchForecast()) {
+                    checkWeatherForecastAlerts();
+                    // Even without alert, briefly show forecast after hourly update
+                    if (UI::activePage != PAGE_FORECAST) {
+                        UI::pauseCarousel();
+                        UI::activePage = PAGE_FORECAST;
+                        UI::needsRedraw = true;
+                    }
+                }
             }
         }
 

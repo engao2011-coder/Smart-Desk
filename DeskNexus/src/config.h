@@ -74,6 +74,10 @@
 // - fetched at most once per wall-clock hour
 // - successful fetch window is persisted in NVS
 
+// Forecast (5-day / 3-hour free API)
+#define FORECAST_DAYS              5       // max displayable forecast days
+#define FORECAST_TEMP_SWING_ALERT  10.0f   // °C/°F swing vs current temp triggers alert
+
 // ---------------------------------------------------------------------------
 // Prayer Times (Aladhan API — https://aladhan.com/prayer-times-api)
 // ---------------------------------------------------------------------------
