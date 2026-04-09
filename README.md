@@ -146,6 +146,40 @@ Or use the PlatformIO IDE toolbar buttons (✓ Build / → Upload / 🔌 Monitor
 
 ---
 
+## OTA (Over-The-Air) Updates
+
+Once the device is running on your local network you can update the firmware
+without a USB cable using either method below.
+
+### Method 1 — ArduinoOTA (PlatformIO / Arduino IDE push)
+
+```bash
+# Push new firmware wirelessly — device must be on the same network
+pio run -e cyd-ota -t upload --upload-port desknexus.local
+```
+
+The `cyd-ota` environment is pre-configured in `platformio.ini` with
+`upload_protocol = espota` and `upload_port = desknexus.local`.
+
+> **Optional password protection:** Uncomment `#define OTA_PASSWORD` in
+> `src/config.h` and set your password. Then add `--upload-flags --auth=<pass>`
+> to the PlatformIO upload command.
+
+### Method 2 — HTTP browser upload
+
+1. Navigate to **http://desknexus.local** (or the device IP) on your
+   browser.
+2. Click **Firmware Update**.
+3. Choose the compiled `.bin` file
+   (`DeskNexus/.pio/build/cyd/firmware.bin` after `pio run`).
+4. Click **Upload & Flash** — a progress bar shows transfer progress.
+5. The device restarts automatically when the flash completes.
+
+The HTTP upload page is protected with a per-session CSRF token so it
+cannot be triggered by a cross-site request.
+
+---
+
 ## Screen Layout (Portrait 240 × 320)
 
 ```

@@ -18,6 +18,7 @@
 #include <WebServer.h>
 #include <Preferences.h>
 #include <ESPmDNS.h>
+#include <Update.h>
 #include <time.h>
 #include <cstring>
 #include "config.h"
@@ -223,6 +224,19 @@ static String htmlEscape(const String& s) {
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Constant-time string comparison (prevents CSRF token timing side-channels)
+// ---------------------------------------------------------------------------
+static bool secureStrEqual(const String& a, const String& b) {
+    // Lengths are compared first (this leaks length, but token length is fixed).
+    if (a.length() != b.length()) return false;
+    uint8_t diff = 0;
+    for (unsigned int i = 0; i < a.length(); i++) {
+        diff |= (uint8_t)a[i] ^ (uint8_t)b[i];
+    }
+    return diff == 0;
+}
+
 static String wifiScanHTML() {
     // Scan for available networks
     int n = WiFi.scanNetworks();
@@ -347,6 +361,7 @@ static String statusPage() {
   </table>
   <a class="btn" href="/setup">&#9881; Wi-Fi Setup</a>
   <a class="btn" href="/settings" style="background:#0f3460;margin-top:10px">&#9881; Settings</a>
+  <a class="btn" href="/update" style="background:#0f3460;margin-top:10px">&#128260; Firmware Update</a>
 </div>
 </body>
 </html>
@@ -546,6 +561,165 @@ display:flex;justify-content:center;align-items:center;min-height:100vh}</style>
 )rawhtml";
 }
 
+
+// ---------------------------------------------------------------------------
+// OTA firmware update page
+// ---------------------------------------------------------------------------
+static String otaPage() {
+    String html = R"rawhtml(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeskNexus Firmware Update</title>
+<style>
+  body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
+       display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+  .card{background:#16213e;border-radius:12px;padding:32px;max-width:420px;width:90%;box-shadow:0 4px 24px #0005}
+  h2{margin:0 0 24px;color:#e94560;text-align:center}
+  label{display:block;margin:12px 0 4px;font-size:.9rem}
+  input[type=file]{width:100%;padding:10px;border:none;border-radius:6px;
+                   background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}
+  input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;
+                     background:#e94560;color:#fff;cursor:pointer;margin-top:16px;
+                     font-weight:bold;font-size:1rem}
+  input[type=submit]:hover{background:#c73652}
+  input[type=submit]:disabled{background:#555;cursor:not-allowed}
+  .warn{color:#f0a500;font-size:.85rem;margin-top:8px;text-align:center}
+  .msg{text-align:center;color:#4ecca3;margin-top:12px;font-size:.9rem;min-height:1.2em}
+  a.btn{display:block;text-align:center;margin-top:14px;color:#4ecca3;font-size:.85rem}
+  progress{width:100%;height:16px;border-radius:8px;margin-top:14px;display:none}
+  progress::-webkit-progress-bar{background:#0f3460;border-radius:8px}
+  progress::-webkit-progress-value{background:#4ecca3;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>&#128260; Firmware Update</h2>
+  <form id="upForm" method="POST" enctype="multipart/form-data">
+    <label for="fw">Select firmware binary (.bin)</label>
+    <input type="file" id="fw" name="firmware" accept=".bin" required>
+    <p class="warn">&#9888; The device will restart after flashing. Do not power off.</p>
+    <input type="submit" id="submitBtn" value="Upload &amp; Flash">
+  </form>
+  <progress id="bar" value="0" max="100"></progress>
+  <p class="msg" id="statusMsg"></p>
+  <a class="btn" href="/">&#8592; Back to Status</a>
+</div>
+<script>
+  var CSRF_TOKEN = ')rawhtml";
+    html += String(csrfToken);
+    html += R"rawhtml(';
+  document.getElementById('upForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var bar = document.getElementById('bar');
+    var msg = document.getElementById('statusMsg');
+    var btn = document.getElementById('submitBtn');
+    bar.style.display = 'block';
+    bar.value = 0;
+    btn.disabled = true;
+    msg.textContent = 'Uploading…';
+    var fd = new FormData(this);
+    var xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = function(ev) {
+      if (ev.lengthComputable) bar.value = Math.round(ev.loaded / ev.total * 100);
+    };
+    xhr.onload = function() {
+      bar.value = 100;
+      if (xhr.status === 200) {
+        msg.textContent = '✓ Flash complete — device restarting…';
+      } else {
+        msg.style.color = '#e94560';
+        msg.textContent = '✗ Update failed: ' + xhr.responseText;
+        btn.disabled = false;
+      }
+    };
+    xhr.onerror = function() {
+      msg.style.color = '#e94560';
+      msg.textContent = '✗ Network error during upload.';
+      btn.disabled = false;
+    };
+    xhr.open('POST', '/do-update?csrf=' + CSRF_TOKEN);
+    xhr.send(fd);
+  });
+</script>
+</body>
+</html>
+)rawhtml";
+    return html;
+}
+
+// ---------------------------------------------------------------------------
+// OTA upload handler — called for each chunk as data arrives
+// ---------------------------------------------------------------------------
+static bool   _otaCsrfOk   = false;
+static bool   _otaUpdateOk  = false;
+static String _otaErrorMsg;   // set on failure so handleOtaComplete can report it
+
+static void handleOtaUpload() {
+    HTTPUpload& upload = server.upload();
+
+    if (upload.status == UPLOAD_FILE_START) {
+        // Reset per-request state so a new upload always starts clean.
+        _otaCsrfOk   = false;
+        _otaUpdateOk = false;
+        _otaErrorMsg = "";
+
+        // CSRF token is passed as URL query parameter: /do-update?csrf=TOKEN
+        // Use constant-time comparison to prevent timing side-channels.
+        _otaCsrfOk = secureStrEqual(server.arg("csrf"), String(csrfToken));
+        if (!_otaCsrfOk) {
+            Serial.println("[OTA] HTTP update rejected: invalid CSRF token.");
+            return;
+        }
+        Serial.printf("[OTA] HTTP update start: %s\n", upload.filename.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) {
+            _otaErrorMsg = Update.errorString();
+            Update.printError(Serial);
+            // _otaUpdateOk stays false — subsequent chunks will be skipped
+        } else {
+            _otaUpdateOk = true;
+        }
+    } else if (upload.status == UPLOAD_FILE_WRITE) {
+        if (!_otaCsrfOk || !_otaUpdateOk) return;
+        if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+            _otaErrorMsg = Update.errorString();
+            Update.printError(Serial);
+            _otaUpdateOk = false;  // abort further writes on error
+        } else {
+            Serial.printf("[OTA] Written %u bytes\r", upload.totalSize);
+        }
+    } else if (upload.status == UPLOAD_FILE_END) {
+        if (!_otaCsrfOk || !_otaUpdateOk) return;
+        if (Update.end(true)) {
+            Serial.printf("\n[OTA] HTTP update complete: %u bytes.\n", upload.totalSize);
+        } else {
+            _otaErrorMsg = Update.errorString();
+            Update.printError(Serial);
+            _otaUpdateOk = false;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OTA completion handler — called after all upload data has been received
+// ---------------------------------------------------------------------------
+static void handleOtaComplete() {
+    if (!_otaCsrfOk) {
+        server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
+        return;
+    }
+    if (!_otaUpdateOk || Update.hasError()) {
+        String err = _otaErrorMsg.length() > 0 ? _otaErrorMsg : String(Update.errorString());
+        server.send(500, "text/plain", "Update failed: " + err);
+    } else {
+        server.send(200, "text/plain", "OK");
+        delay(500);
+        ESP.restart();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Web server route handlers
 // ---------------------------------------------------------------------------
@@ -562,7 +736,7 @@ static void handleSettings() {
 }
 
 static void handleSaveSettings() {
-    if (server.arg("csrf") != String(csrfToken)) {
+    if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
     }
@@ -636,7 +810,7 @@ static void handleSaveSettings() {
 }
 
 static void handleResetSettings() {
-    if (server.arg("csrf") != String(csrfToken)) {
+    if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
     }
@@ -650,7 +824,7 @@ static void handleSetup() {
 }
 
 static void handleSave() {
-    if (server.arg("csrf") != String(csrfToken)) {
+    if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
     }
@@ -698,6 +872,8 @@ static void startServer() {
         server.on("/settings",       HTTP_GET,  handleSettings);
         server.on("/save-settings",  HTTP_POST, handleSaveSettings);
         server.on("/reset-settings", HTTP_GET,  handleResetSettings);
+        server.on("/update",         HTTP_GET,  []() { server.send(200, "text/html", otaPage()); });
+        server.on("/do-update",      HTTP_POST, handleOtaComplete, handleOtaUpload);
         server.on("/generate_204",   HTTP_GET,  handleCaptiveProbe);
         server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
         server.on("/ncsi.txt",       HTTP_GET,  handleCaptiveProbe);
