@@ -42,6 +42,17 @@
 // Access-Point fallback settings (captive portal)
 #define AP_SSID      "DeskNexus-Setup"
 #define AP_PASSWORD  ""                   // Open network; set a password if desired
+// Auto-generated AP password: "desk" + last 4 hex chars of device MAC address.
+// The derived password is displayed on the TFT setup screen.
+#define AP_PASSWORD_PREFIX  "desk"
+
+// ---------------------------------------------------------------------------
+// Setup Wizard / QR code
+// ---------------------------------------------------------------------------
+#define SETUP_QR_MODULE_PX    3     // QR module size in pixels (3 → ~105px for v4)
+#define SETUP_QR_VERSION      4     // QR version 4 = 33×33 modules
+#define FIRST_BOOT_NVS_KEY    "firstBoot"
+#define WIZARD_STATE_NVS_KEY  "wizState"
 
 // ---------------------------------------------------------------------------
 // NTP (time sync)
@@ -97,6 +108,13 @@
 #define PRAYER_MAX_SNOOZE_COUNT   3    // max snooze attempts per prayer per day
 #define PRAYER_REMINDER_MINUTES   30
 #define PRAYER_FULLSCREEN_MS      600000
+
+// Banner notification durations (ms) — per event type
+#define BANNER_PRE_ALERT_MS   15000   // 15 s for upcoming prayer
+#define BANNER_DUE_MS         20000   // 20 s for prayer due
+#define BANNER_REPEAT_MS       8000   // 8 s for repeat reminder
+#define BANNER_SNOOZE_EXP_MS  12000   // 12 s for snooze expired
+#define BANNER_DEFAULT_MS      5000   // 5 s for generic banners
 
 // ---------------------------------------------------------------------------
 // Stock Monitor

@@ -43,6 +43,9 @@ static bool        serverStarted = false;
 static bool        mdnsActive = false;
 static bool        dnsActive = false;
 
+// Derived AP password: prefix + last 4 hex chars of MAC
+static char apDerivedPassword[16] = {};
+
 // CSRF token — generated each time the server starts, embedded in all forms.
 static char csrfToken[17] = {};
 
@@ -50,6 +53,22 @@ static void generateCsrfToken() {
     snprintf(csrfToken, sizeof(csrfToken), "%08lx%08lx",
              (unsigned long)(uint32_t)esp_random(),
              (unsigned long)(uint32_t)esp_random());
+}
+
+// Derive a device-unique AP password from the MAC address
+// Format: AP_PASSWORD_PREFIX + last 4 hex digits of MAC (e.g. "deskA1B2")
+static void deriveApPassword() {
+    uint8_t mac[6];
+    WiFi.macAddress(mac);
+    snprintf(apDerivedPassword, sizeof(apDerivedPassword), "%s%02X%02X",
+             AP_PASSWORD_PREFIX, mac[4], mac[5]);
+}
+
+// Get the active AP password (derived or manual from config.h)
+static const char* getApPassword() {
+    if (strlen(AP_PASSWORD) > 0) return AP_PASSWORD;
+    if (apDerivedPassword[0] == '\0') deriveApPassword();
+    return apDerivedPassword;
 }
 
 struct SavedNetwork {
@@ -243,8 +262,13 @@ static String wifiScanHTML() {
     String options = "";
     for (int i = 0; i < n; i++) {
         String ssidSafe = htmlEscape(WiFi.SSID(i));
+        int rssi = WiFi.RSSI(i);
+        // Signal bars: 4 > -50, 3 > -60, 2 > -70, 1 > -80, 0 else
+        int bars = rssi > -50 ? 4 : rssi > -60 ? 3 : rssi > -70 ? 2 : rssi > -80 ? 1 : 0;
+        String barStr = "";
+        for (int b = 0; b < 4; b++) barStr += (b < bars) ? "&#9608;" : "&#9617;";
         options += "<option value=\"" + ssidSafe + "\">" +
-                   ssidSafe + " (" + String(WiFi.RSSI(i)) + " dBm)</option>\n";
+                   ssidSafe + " " + barStr + "</option>\n";
     }
     return options;
 }
@@ -268,12 +292,25 @@ static String portalPage() {
   input[type=submit]{background:#e94560;cursor:pointer;margin-top:20px;font-weight:bold}
   input[type=submit]:hover{background:#c73652}
   .msg{text-align:center;color:#4ecca3;margin-top:16px;font-size:.9rem}
+  .pw-wrap{position:relative}
+  .pw-wrap input{padding-right:44px}
+  .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
+             background:none;border:none;color:#4ecca3;cursor:pointer;font-size:1.1rem;
+             padding:4px 6px;width:auto}
+  .refresh{display:inline-block;margin:6px 0;color:#4ecca3;font-size:.8rem;
+           cursor:pointer;text-decoration:underline;background:none;border:none}
+  #overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+           background:#1a1a2e;z-index:999;flex-direction:column;
+           justify-content:center;align-items:center}
+  .spinner{width:48px;height:48px;border:4px solid #0f3460;border-top-color:#e94560;
+           border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
+  @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 <div class="card">
   <h2>&#128338; DeskNexus Setup</h2>
-  <form method="POST" action="/save">
+  <form id="wifiForm" method="POST" action="/save">
     <input type="hidden" name="csrf" value=")rawhtml";
     html += String(csrfToken);
     html += R"rawhtml(">";
@@ -284,12 +321,26 @@ static String portalPage() {
     html += wifiScanHTML();
     html += R"rawhtml(
     </select>
+    <button type="button" class="refresh" onclick="location.reload()">&#8635; Rescan networks</button>
     <label for="pass">Password</label>
-    <input type="password" id="pass" name="pass" placeholder="Wi-Fi password">
+    <div class="pw-wrap">
+      <input type="password" id="pass" name="pass" placeholder="Wi-Fi password">
+      <button type="button" class="pw-toggle" onclick="var p=document.getElementById('pass');p.type=p.type==='password'?'text':'password'">&#128065;</button>
+    </div>
     <input type="submit" value="Connect">
   </form>
   <p class="msg">DeskNexus will restart after saving.</p>
 </div>
+<div id="overlay">
+  <div class="spinner"></div>
+  <h2 style="color:#4ecca3">Connecting...</h2>
+  <p style="color:#9bd">DeskNexus is restarting.<br>Reconnect to your home WiFi.</p>
+</div>
+<script>
+document.getElementById('wifiForm').addEventListener('submit',function(){
+  setTimeout(function(){document.getElementById('overlay').style.display='flex'},100);
+});
+</script>
 </body>
 </html>
 )rawhtml";
@@ -536,6 +587,23 @@ static String settingsPage() {
 
     <input type="submit" value="Save Settings">
   </form>
+
+  <h3 style="margin-top:28px;color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px">Saved Wi-Fi Networks</h3>)rawhtml";
+    if (savedNetworkCount == 0) {
+        html += "<p style=\"color:#9bd;font-size:.85rem\">No saved networks.</p>";
+    } else {
+        for (int i = 0; i < savedNetworkCount; i++) {
+            String sSafe = htmlEscape(String(savedNetworks[i].ssid));
+            html += "<div style=\"display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0f3460\">";
+            html += "<span style=\"font-size:.95rem\">" + sSafe + "</span>";
+            html += "<form method=\"POST\" action=\"/forget-network\" style=\"margin:0\">";
+            html += "<input type=\"hidden\" name=\"csrf\" value=\"" + String(csrfToken) + "\">";
+            html += "<input type=\"hidden\" name=\"idx\" value=\"" + String(i) + "\">";
+            html += "<button type=\"submit\" style=\"background:#e94560;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:.8rem;cursor:pointer\" onclick=\"return confirm('Forget " + sSafe + "?')\">Forget</button>";
+            html += "</form></div>";
+        }
+    }
+    html += R"rawhtml(
   <div class="link"><a href="/">&#8592; Back to Status</a></div>
   <a class="rst" href="/reset-settings?csrf=)rawhtml";
     html += String(csrfToken);
@@ -823,6 +891,25 @@ static void handleSetup() {
     server.send(200, "text/html", portalPage());
 }
 
+static void handleForgetNetwork() {
+    if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
+        server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
+        return;
+    }
+    int idx = server.arg("idx").toInt();
+    if (idx >= 0 && idx < savedNetworkCount) {
+        // Shift remaining networks down
+        for (int i = idx; i < savedNetworkCount - 1; i++) {
+            savedNetworks[i] = savedNetworks[i + 1];
+        }
+        savedNetworkCount--;
+        memset(&savedNetworks[savedNetworkCount], 0, sizeof(SavedNetwork));
+        persistSavedNetworks();
+    }
+    server.sendHeader("Location", "/settings", true);
+    server.send(302, "text/plain", "");
+}
+
 static void handleSave() {
     if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
@@ -872,6 +959,7 @@ static void startServer() {
         server.on("/settings",       HTTP_GET,  handleSettings);
         server.on("/save-settings",  HTTP_POST, handleSaveSettings);
         server.on("/reset-settings", HTTP_GET,  handleResetSettings);
+        server.on("/forget-network", HTTP_POST, handleForgetNetwork);
         server.on("/update",         HTTP_GET,  []() { server.send(200, "text/html", otaPage()); });
         server.on("/do-update",      HTTP_POST, handleOtaComplete, handleOtaUpload);
         server.on("/generate_204",   HTTP_GET,  handleCaptiveProbe);
@@ -897,10 +985,12 @@ static void startAP() {
         mdnsActive = false;
     }
 
+    // Derive device-unique AP password if not manually set in config.h
+    deriveApPassword();
+
     WiFi.mode(WIFI_AP);
-    // Note: passing nullptr creates an open (password-free) AP.
-    // Set AP_PASSWORD in config.h to a non-empty string for a secured AP.
-    WiFi.softAP(AP_SSID, strlen(AP_PASSWORD) > 0 ? AP_PASSWORD : nullptr);
+    const char* apPass = getApPassword();
+    WiFi.softAP(AP_SSID, apPass);
 
     if (dnsActive) {
         dnsServer.stop();
@@ -913,8 +1003,8 @@ static void startAP() {
 
     staConnected = false;
     apActive = true;
-    Serial.printf("[Network] AP mode: SSID=%s  IP=%s\n",
-                  AP_SSID, WiFi.softAPIP().toString().c_str());
+    Serial.printf("[Network] AP mode: SSID=%s  Pass=%s  IP=%s\n",
+                  AP_SSID, getApPassword(), WiFi.softAPIP().toString().c_str());
 }
 
 // ---------------------------------------------------------------------------

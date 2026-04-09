@@ -172,26 +172,26 @@ static void processPrayerReminderEvent() {
     switch (event.type) {
         case Prayer::REMINDER_PRE_ALERT:
             snprintf(msg, sizeof(msg), "%s at %s in %d min", name, time, event.minutesLeft);
-            UI::showBanner(msg, 10000);
+            UI::showBanner(msg, BANNER_PRE_ALERT_MS, UI::BANNER_GOLD);
             UI::activePage = PAGE_PRAYER;
             UI::needsRedraw = true;
             break;
         case Prayer::REMINDER_DUE:
             snprintf(msg, sizeof(msg), "%s is due now", name);
             UI::wake();  // ensure screen is on when Azan fires
-            UI::showBanner(msg, 10000);
+            UI::showBanner(msg, BANNER_DUE_MS, UI::BANNER_RED);
             UI::showAzanScreen(event.prayerIndex);
             break;
         case Prayer::REMINDER_REPEAT:
             snprintf(msg, sizeof(msg), "Reminder: %s still pending", name);
-            UI::showBanner(msg, 10000);
+            UI::showBanner(msg, BANNER_REPEAT_MS, UI::BANNER_ACCENT);
             UI::activePage = PAGE_PRAYER;
             UI::needsRedraw = true;
             break;
         case Prayer::REMINDER_SNOOZE_EXPIRED:
             snprintf(msg, sizeof(msg), "%s snooze ended", name);
             UI::wake();  // wake display when snooze expires
-            UI::showBanner(msg, 10000);
+            UI::showBanner(msg, BANNER_SNOOZE_EXP_MS, UI::BANNER_GOLD);
             UI::activePage = PAGE_PRAYER;
             UI::needsRedraw = true;
             break;
@@ -200,6 +200,12 @@ static void processPrayerReminderEvent() {
             break;
     }
 }
+
+// ── Wizard / AP mode state ─────────────────────────────────────────────
+static bool    wizardActive    = false;
+static bool    apScreenShown   = false;
+static unsigned long wizardStepMs = 0;     // timestamp of current wizard screen
+static unsigned long lastAPUpdate = 0;     // AP client count refresh
 
 // ── setup() ───────────────────────────────────────────────────────────────
 void setup() {
@@ -227,14 +233,51 @@ void setup() {
     // Init stocks helper
     Stocks::begin();
 
+    // Check first-boot / wizard state
+    bool firstBoot = UI::isFirstBoot();
+    UI::WizardState savedWizState = UI::loadWizardState();
+    bool wizardResumeConnect = (savedWizState == UI::WIZ_CONNECTING);
+
     // Network — hybrid STA/AP
-    UI::showSplashStatus("Connecting WiFi...");
+    if (wizardResumeConnect || !firstBoot) {
+        UI::showSplashStatus("Connecting WiFi...");
+    } else if (firstBoot) {
+        UI::showSplashStatus("Starting setup...");
+    }
+
+    // Show connecting screen during STA attempts
+    if (!firstBoot || wizardResumeConnect) {
+        // For non-first-boot or wizard resume: show connecting on display
+        if (Network::savedNetworkCount > 0 || wizardResumeConnect) {
+            Network::loadCredentials();
+            if (Network::savedNetworkCount > 0) {
+                UI::showConnectingScreen(Network::savedNetworks[0].ssid);
+            }
+        }
+    }
+
     bool wifiOk = Network::begin();
 
     if (wifiOk) {
+        // Show success briefly
+        String ip = WiFi.localIP().toString();
+        UI::showConnectionResult(true, ip.c_str());
+        delay(1500);
+
+        if (firstBoot && wizardResumeConnect) {
+            // Wizard was waiting for connection — show config hint then finish
+            UI::drawWizardConfigHint();
+            delay(8000);
+            UI::clearFirstBoot();
+        } else if (firstBoot) {
+            // First boot but connected with pre-flashed creds
+            UI::clearFirstBoot();
+        }
+
         // Start ArduinoOTA so firmware can be pushed wirelessly from PlatformIO.
         OTA::begin();
 
+        UI::showSplash();
         UI::showSplashStatus("Syncing time...");
         TimeSync::apply(Settings::utcOffset);
 
@@ -280,15 +323,36 @@ void setup() {
 
         UI::showSplashStatus("Loading stocks..");
         Stocks::fetchNext();
+
+        wizardActive = false;
     } else {
-        UI::showSplashStatus("AP 192.168.4.1");
-        delay(2000);
+        // WiFi failed — enter AP mode
+        if (wizardResumeConnect) {
+            // Was in wizard, connection failed after user entered creds
+            UI::showConnectionResult(false, "");
+            delay(2500);
+        }
+
+        if (firstBoot) {
+            // First boot — run welcome wizard
+            wizardActive = true;
+            UI::wizardState = UI::WIZ_WELCOME;
+            UI::drawWizardWelcome();
+            wizardStepMs = millis();
+        } else {
+            // Not first boot — just show AP setup screen
+            wizardActive = false;
+            UI::showAPSetupScreen();
+            apScreenShown = true;
+        }
     }
 
-    // Short splash delay then go to main screen
-    delay(500);
-    UI::needsRedraw = true;
-    firstDraw       = true;
+    if (!wizardActive && !apScreenShown) {
+        // Short splash delay then go to main screen
+        delay(500);
+        UI::needsRedraw = true;
+        firstDraw       = true;
+    }
 }
 
 // ── loop() ────────────────────────────────────────────────────────────────
@@ -297,6 +361,69 @@ void loop() {
 
     // ── Web portal handler (AP mode) ──────────────────────────────────────
     Network::handle();
+
+    // ── Wizard / AP setup screen loop ─────────────────────────────────────
+    if (wizardActive && Network::apActive) {
+        unsigned long now = millis();
+
+        // Handle touch for wizard advancement
+        bool touched = false;
+        if (touch.tirqTouched() && touch.touched()) {
+            touch.getPoint();  // consume the touch event
+            touched = true;
+        }
+
+        switch (UI::wizardState) {
+            case UI::WIZ_WELCOME:
+                // Auto-advance after 5s or on touch
+                if (touched || (now - wizardStepMs >= 5000)) {
+                    UI::wizardState = UI::WIZ_WIFI_QR;
+                    UI::showAPSetupScreen();
+                    wizardStepMs = now;
+                }
+                break;
+            case UI::WIZ_WIFI_QR:
+                // Show AP setup screen — transition to WAITING after 2s
+                if (now - wizardStepMs >= 2000) {
+                    UI::wizardState = UI::WIZ_WAITING;
+                    wizardStepMs = now;
+                }
+                break;
+            case UI::WIZ_WAITING:
+                // Update client count every 2s
+                if (now - lastAPUpdate >= 2000) {
+                    lastAPUpdate = now;
+                    UI::updateAPSetupWaiting();
+                }
+                // handleSave will call ESP.restart(); wizard persists state before
+                break;
+            default:
+                break;
+        }
+
+        // Save wizard state so restart after WiFi save resumes at CONNECTING
+        if (UI::wizardState >= UI::WIZ_WAITING) {
+            static UI::WizardState lastSavedWiz = UI::WIZ_WELCOME;
+            if (UI::wizardState != lastSavedWiz) {
+                UI::saveWizardState(UI::WIZ_CONNECTING);
+                lastSavedWiz = UI::wizardState;
+            }
+        }
+
+        delay(50);
+        return;  // skip normal main loop while wizard is active
+    }
+
+    // AP mode (non-wizard) — just update status periodically
+    if (Network::apActive && apScreenShown) {
+        unsigned long now = millis();
+        if (now - lastAPUpdate >= 3000) {
+            lastAPUpdate = now;
+            UI::updateAPSetupWaiting();
+        }
+        delay(50);
+        return;  // skip normal main loop while in AP mode
+    }
 
     // ── ArduinoOTA handler ────────────────────────────────────────────────
     // Start OTA lazily on first WiFi connect (covers reconnect after AP mode).

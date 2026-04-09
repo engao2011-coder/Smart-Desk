@@ -26,6 +26,7 @@
 #pragma once
 
 #include <TFT_eSPI.h>
+#include <qrcode.h>
 #include "config.h"
 #include "settings.h"
 #include "network.h"
@@ -101,11 +102,17 @@ namespace UI {
 
 // ── Azan screen layout constants (shared by drawAzanScreen + handleTouch) ──
 static constexpr int AZAN_BUTTON_MARGIN = 68;   // height reserved for bottom buttons
-static constexpr int AZAN_CONTENT_H     = 132;  // text-content block height
-static constexpr int AZAN_START_Y       = (SCREEN_H - AZAN_BUTTON_MARGIN - AZAN_CONTENT_H) / 2;
-// X-dismiss hit zone: top-right corner of the card (y < AZAN_START_Y, x > SCREEN_W-40)
+static constexpr int AZAN_CONTENT_H     = 200;  // expanded text-content block height
+static constexpr int AZAN_START_Y       = 10;    // start near top
+// X-dismiss hit zone: top-right corner of the card (y < 50, x > SCREEN_W-40)
 static constexpr int AZAN_DISMISS_X     = SCREEN_W - 40;
-static constexpr int AZAN_DISMISS_Y_MAX = AZAN_START_Y;  // tap must be above content start
+static constexpr int AZAN_DISMISS_Y_MAX = 50;
+
+// ── Banner constants ───────────────────────────────────────────────────────
+static constexpr int BANNER_H = 36;   // taller banner for readability
+
+// Banner color types — controls banner background per event urgency
+enum BannerStyle { BANNER_ACCENT, BANNER_GOLD, BANNER_RED };
 
 // ── State ──────────────────────────────────────────────────────────────────
 static TFT_eSPI tft = TFT_eSPI();
@@ -118,11 +125,17 @@ static bool     azanScreenActive = false;
 static int      azanPrayerIndex = -1;
 static unsigned long azanScreenExpiry = 0;
 static int      prayerScrollOffset = 0;
+// Page transition animation state
+static int      transitionDir     = 0;  // -1=left, 0=none, 1=right
+static int      transitionStep    = 0;
+static int      transitionTarget  = -1;
 
 // Touch & carousel timing
 static unsigned long lastTouchMs        = 0;
 static unsigned long lastPageSwitch     = 0;
 static unsigned long carouselPausedUntil = 0;
+// Page dot pulse animation
+static unsigned long dotPulseStart      = 0;
 
 // ── Touch calibration ─────────────────────────────────────────────────────
 static uint16_t calData[5] = TOUCH_CAL_DATA;
@@ -136,6 +149,9 @@ static void hline(int y) { hline(y, theme.separator); }
 static void fillPanel(int y, int h, uint16_t color) {
     tft.fillRect(0, y, SCREEN_W, h, color);
 }
+
+// Forward declarations for functions used before their definition
+static void playPanelTransition(int direction);
 
 static void updateTheme() {
     bool wantDark = Settings::themeDark;
@@ -247,6 +263,10 @@ static int nextCarouselPage(int fromPage, int direction) {
 static bool switchPageBy(int direction) {
     int nextPage = nextAllowedPage(activePage, direction);
     bool changed = (nextPage != activePage);
+    if (changed) {
+        playPanelTransition(direction);
+        dotPulseStart = millis();
+    }
     activePage = nextPage;
     lastPageSwitch = millis();
     needsRedraw = true;
@@ -264,6 +284,10 @@ static void advancePage() {
     // Use carousel-safe advance that skips PAGE_STOCKS;
     // stocks page is only shown when a stock moves >= STOCK_INTRA_CHANGE_PCT
     int nextPage = nextCarouselPage(activePage, 1);
+    if (nextPage != activePage) {
+        playPanelTransition(1);
+        dotPulseStart = millis();
+    }
     activePage = nextPage;
     lastPageSwitch = millis();
     needsRedraw = true;
@@ -330,16 +354,16 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             // Button row — Prayed (left) or Snooze (right)
             int bW = SCREEN_W / 2 - 18;
             if (tx < SCREEN_W / 2) {
-                // Flash Prayed button
+                // Flash Prayed button (120ms visual feedback)
                 tft.fillRoundRect(12, buttonTop, bW, 48, 10, theme.textDim);
-                delay(60);
+                delay(120);
                 if (Prayer::markPrayed(azanPrayerIndex)) {
                     dismissAzanScreen();
                 }
             } else {
-                // Flash Snooze button
+                // Flash Snooze button (120ms visual feedback)
                 tft.fillRoundRect(SCREEN_W / 2 + 6, buttonTop, bW, 48, 10, theme.textDim);
-                delay(60);
+                delay(120);
                 if (!Prayer::isSnoozed(azanPrayerIndex) && Prayer::snoozePendingPrayer(azanPrayerIndex)) {
                     dismissAzanScreen();
                 }
@@ -357,19 +381,19 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
     }
 
     if (hasPrayerFooterActions()) {
-        const int footerTop = SCREEN_H - 50;
+        const int footerTop = SCREEN_H - 56;
         if (ty >= footerTop) {
-            // Visual flash feedback before action
+            // Visual flash feedback before action (120ms)
             const int bW = SCREEN_W / 2 - 18;
-            const int fy = SCREEN_H - 48 - 4;  // matches drawPrayerPanel footer geometry
+            const int fy = SCREEN_H - 52 - 4;  // matches drawPrayerPanel footer geometry
             const int bH = 40;
             if (tx < SCREEN_W / 2) {
                 tft.fillRoundRect(14, fy, bW, bH, 8, theme.textDim);
-                delay(60);
+                delay(120);
                 Prayer::markPendingPrayed();
             } else {
                 tft.fillRoundRect(SCREEN_W / 2 + 4, fy, bW, bH, 8, theme.textDim);
-                delay(60);
+                delay(120);
                 int fp = Prayer::pendingPrayerIndex();
                 if (fp >= 0 && !Prayer::isSnoozed(fp)) {
                     Prayer::snoozePendingPrayer(fp);
@@ -382,8 +406,11 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
 
     // Tap a MISSED prayer row to retroactively mark it as prayed
     if (activePage == PAGE_PRAYER && Prayer::current.valid &&
-        (int)ty >= LAYOUT_PANEL_Y && (int)ty < (SCREEN_H - 50)) {
-        const int ROW_H  = 26;
+        (int)ty >= LAYOUT_PANEL_Y && (int)ty < (SCREEN_H - 56)) {
+        const int pendingForTouch = Prayer::pendingPrayerIndex();
+        const int footerHTouch = pendingForTouch >= 0 ? 52 : 0;
+        const int availHTouch = (LAYOUT_PANEL_Y + LAYOUT_PANEL_H - 14) - (LAYOUT_PANEL_Y + 14) - footerHTouch;
+        const int ROW_H  = max(22, min(30, availHTouch / Prayer::PRAYER_COUNT));
         const int START_Y = LAYOUT_PANEL_Y + 14;
         int tappedIdx = ((int)ty - START_Y) / ROW_H + prayerScrollOffset;
         if (tappedIdx >= 0 && tappedIdx < Prayer::PRAYER_COUNT) {
@@ -407,8 +434,7 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         }
 
         if (changed) {
-            // Visual feedback — flash accent line at top of panel
-            tft.drawFastHLine(0, LAYOUT_PANEL_Y, SCREEN_W, theme.accent);
+            // Wipe transition already played in switchPageBy()
             return true;
         }
         return false;
@@ -430,23 +456,25 @@ static void drawStatusBar(bool wifiOk, const String& dateStr, const String& ipSt
     tft.setTextSize(1);
     tft.setFreeFont(nullptr);
 
-    // Page dots — right side
+    // Page dots — right side (ring vs filled + accent glow for active)
     const int DOT_R = 4;
     const int DOT_GAP = 14;
     int dotsW = PAGE_COUNT * DOT_GAP;
     int dotX = SCREEN_W - dotsW - 8;
+    bool pulsing = (millis() - dotPulseStart) < 300;
     for (int i = 0; i < PAGE_COUNT; i++) {
         int cx = dotX + i * DOT_GAP + DOT_R;
         int cy = 11;
         bool allowed = isPageAllowed(i);
         if (i == activePage) {
-            tft.fillCircle(cx, cy, DOT_R, theme.accent);
-            tft.drawCircle(cx, cy, DOT_R + 2, theme.panel);
+            int r = pulsing ? DOT_R + 2 : DOT_R;
+            tft.fillCircle(cx, cy, r + 2, theme.panel);   // clear area
+            tft.fillCircle(cx, cy, r, theme.accent);
+            tft.drawCircle(cx, cy, r + 1, theme.gold);    // accent glow ring
         } else if (allowed) {
-            tft.drawCircle(cx, cy, DOT_R, theme.textDim);
+            tft.drawCircle(cx, cy, DOT_R, theme.textDim); // hollow ring
         } else {
-            // Page unavailable (e.g. Stocks while offline) — faint hollow dot
-            tft.fillCircle(cx, cy, DOT_R, theme.panel);   // erase interior
+            tft.fillCircle(cx, cy, DOT_R, theme.panel);
             tft.drawCircle(cx, cy, DOT_R - 1, theme.separator);
         }
     }
@@ -569,9 +597,11 @@ static void drawHero(const struct tm& t) {
 
     tft.setFreeFont(nullptr);
     tft.setTextSize(2);
-    tft.setTextColor(theme.textDim, theme.panel);
-    char nextBuf[40];
     int minutesLeft = Prayer::minutesUntilNext();
+    // Urgency color: gold when < 5 min, else dim
+    uint16_t cdColor = (minutesLeft >= 0 && minutesLeft < 5) ? theme.gold : theme.textDim;
+    tft.setTextColor(cdColor, theme.panel);
+    char nextBuf[40];
     if (Prayer::current.valid && Prayer::current.nextIndex >= 0 && minutesLeft >= 0) {
         int h = minutesLeft / 60;
         int m = minutesLeft % 60;
@@ -582,10 +612,17 @@ static void drawHero(const struct tm& t) {
         snprintf(nextBuf, sizeof(nextBuf), "--- --:--");
     }
     int subW = tft.textWidth(nextBuf);
-    int subX = 12 + (122 - subW) / 2;
+    // Pulsing alive dot (toggles every second)
+    bool dotOn = (millis() / 1000) % 2 == 0;
+    const char* dotStr = dotOn ? " *" : "  ";
+    int dotW = tft.textWidth(dotStr);
+    int totalW = subW + dotW;
+    int subX = 12 + (122 - totalW) / 2;
     if (subX < 12) subX = 12;
     tft.setCursor(subX, cardY + 64);
     tft.print(nextBuf);
+    tft.setTextColor(dotOn ? theme.gold : theme.panel, theme.panel);
+    tft.print(dotStr);
 
     // ── Vertical divider ──
     const int divX = 138;
@@ -648,7 +685,40 @@ static void drawHero(const struct tm& t) {
 }
 
 // ---------------------------------------------------------------------------
-// Prayer panel (y=124..319) — expanded single-column, 6 rows, readable fonts
+// Helper: draw a small checkmark glyph at (x,y), size ~10px
+// ---------------------------------------------------------------------------
+static void drawCheckmark(int x, int y, uint16_t color) {
+    tft.drawLine(x, y + 5, x + 3, y + 8, color);
+    tft.drawLine(x + 1, y + 5, x + 4, y + 8, color);
+    tft.drawLine(x + 3, y + 8, x + 9, y + 2, color);
+    tft.drawLine(x + 4, y + 8, x + 10, y + 2, color);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: draw a small hourglass glyph at (x,y), size ~10px
+// ---------------------------------------------------------------------------
+static void drawHourglass(int x, int y, uint16_t color) {
+    tft.fillTriangle(x, y, x + 8, y, x + 4, y + 5, color);        // top triangle
+    tft.fillTriangle(x, y + 10, x + 8, y + 10, x + 4, y + 5, color); // bottom triangle
+}
+
+// ---------------------------------------------------------------------------
+// Helper: draw a status pill badge (rounded rect with text)
+// ---------------------------------------------------------------------------
+static void drawPillBadge(int x, int y, const char* text, uint16_t bg, uint16_t fg) {
+    tft.setTextSize(1);
+    int tw = tft.textWidth(text);
+    int pw = tw + 8;
+    int ph = 12;
+    tft.fillRoundRect(x, y, pw, ph, 4, bg);
+    tft.setTextColor(fg, bg);
+    tft.setCursor(x + 4, y + 2);
+    tft.print(text);
+}
+
+// ---------------------------------------------------------------------------
+// Prayer panel (y=124..319) — redesigned with adaptive row height,
+// distinct state visuals, pill badges, checkmarks, and glyphs
 // ---------------------------------------------------------------------------
 static void drawPrayerPanel() {
     fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
@@ -667,13 +737,17 @@ static void drawPrayerPanel() {
     tft.fillRoundRect(8, LAYOUT_PANEL_Y + 8, SCREEN_W - 16, LAYOUT_PANEL_H - 16, 12, theme.panel);
 
     const int pendingForFooter = Prayer::pendingPrayerIndex();
-    const int footerH = pendingForFooter >= 0 ? 48 : 0;
-    const int ROW_H  = 26;
-    const int START_Y = LAYOUT_PANEL_Y + 14;
+    const int footerH = pendingForFooter >= 0 ? 52 : 0;
+    const int CARD_TOP = LAYOUT_PANEL_Y + 14;
+    const int CARD_BOTTOM = LAYOUT_PANEL_Y + LAYOUT_PANEL_H - 14;
+    const int availH = CARD_BOTTOM - CARD_TOP - footerH;
 
-    // Smart scroll: when footer is active, shift the visible window so the
-    // pending prayer (and those after it) remain on screen.
-    const int maxVisible = (LAYOUT_PANEL_H - 14 - footerH - 10) / ROW_H;
+    // Adaptive row height: ensure all 6 prayers fit
+    const int ROW_H = max(22, min(30, availH / Prayer::PRAYER_COUNT));
+    const int maxVisible = availH / ROW_H;
+    const int START_Y = CARD_TOP;
+
+    // Smart scroll: when footer is active, shift visible window so pending prayer is visible
     if (footerH > 0 && maxVisible < Prayer::PRAYER_COUNT) {
         prayerScrollOffset = max(0, min(pendingForFooter - 1,
                                         Prayer::PRAYER_COUNT - maxVisible));
@@ -691,15 +765,21 @@ static void drawPrayerPanel() {
     }
 
     for (int i = prayerScrollOffset; i < Prayer::PRAYER_COUNT; i++) {
+        int visIdx = i - prayerScrollOffset;
+        if (visIdx >= maxVisible) break;
+
         Prayer::RowState rowState = Prayer::rowStateForIndex(i);
-        int ry = START_Y + (i - prayerScrollOffset) * ROW_H;
-        if (ry + ROW_H > (LAYOUT_PANEL_Y + LAYOUT_PANEL_H - footerH - 10)) break;
+        int ry = START_Y + visIdx * ROW_H;
 
         uint16_t rowBg = theme.panel;
         uint16_t fg = theme.textSec;
-        char snoozeLabelBuf[14] = "";
-        const char* statusText = "";
         uint16_t edgeColor = theme.separator;
+        const char* pillText = nullptr;
+        uint16_t pillBg = 0, pillFg = 0;
+        bool showCheckmark = false;
+        bool showHourglass = false;
+        bool showStrikethrough = false;
+        bool pulseBg = false;
 
         switch (rowState) {
             case Prayer::ROW_UPCOMING:
@@ -707,33 +787,47 @@ static void drawPrayerPanel() {
                 fg = theme.textPri;
                 edgeColor = theme.gold;
                 break;
-            case Prayer::ROW_PENDING:
-                rowBg = theme.accent;
+            case Prayer::ROW_PENDING: {
+                // Pulsing amber background
+                pulseBg = true;
+                bool pulseHi = (millis() / 500) % 2 == 0;
+                rowBg = pulseHi ? theme.accent : theme.gold;
                 fg = theme.textPri;
-                statusText = "DUE";
                 edgeColor = theme.accent;
+                pillText = "DUE";
+                pillBg = theme.red;
+                pillFg = theme.textPri;
                 break;
+            }
             case Prayer::ROW_SNOOZED: {
                 rowBg = theme.highlightBg;
                 fg = theme.textPri;
                 edgeColor = theme.textSec;
+                showHourglass = true;
                 char untilBuf[6] = {};
+                static char snoozePillBuf[14];
                 if (Prayer::snoozedUntilText(untilBuf, sizeof(untilBuf))) {
-                    snprintf(snoozeLabelBuf, sizeof(snoozeLabelBuf), "SNZD%s", untilBuf);
+                    snprintf(snoozePillBuf, sizeof(snoozePillBuf), "SNZD%s", untilBuf);
                 } else {
-                    strncpy(snoozeLabelBuf, "SNZD", sizeof(snoozeLabelBuf));
+                    strncpy(snoozePillBuf, "SNZD", sizeof(snoozePillBuf));
                 }
-                statusText = snoozeLabelBuf;
+                pillText = snoozePillBuf;
+                pillBg = theme.textDim;
+                pillFg = theme.textPri;
                 break;
             }
             case Prayer::ROW_DONE:
                 fg = theme.green;
                 edgeColor = theme.green;
+                showCheckmark = true;
                 break;
             case Prayer::ROW_MISSED:
-                fg = theme.red;
-                statusText = "MISS";
+                fg = theme.textDim;
                 edgeColor = theme.red;
+                showStrikethrough = true;
+                pillText = "MISS";
+                pillBg = theme.red;
+                pillFg = theme.textPri;
                 break;
             case Prayer::ROW_NORMAL:
             default:
@@ -744,38 +838,64 @@ static void drawPrayerPanel() {
                 break;
         }
 
+        // Row background
         tft.fillRect(14, ry, SCREEN_W - 28, ROW_H - 2, rowBg);
+
+        // Left edge bar (5px wide — color signals state)
         tft.fillRect(14, ry, 5, ROW_H - 2, edgeColor);
 
         // Prayer name (left) — size 2 for readability
-        tft.setTextSize(2);
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
         tft.setTextColor(fg, rowBg);
-        tft.setCursor(26, ry + 5);
+        tft.setCursor(26, ry + ROW_H - 7);
         tft.print(Prayer::current.prayers[i].name);
 
-        // Status tag (right of name)
-        if (statusText[0] != '\0') {
-            tft.setTextSize(1);
-            tft.setTextColor((rowState == Prayer::ROW_PENDING) ? theme.textPri : theme.textDim, rowBg);
-            tft.setCursor(100, ry + 8);
-            tft.print(statusText);
+        // Checkmark glyph for DONE state
+        if (showCheckmark) {
+            int nameW = tft.textWidth(Prayer::current.prayers[i].name);
+            drawCheckmark(26 + nameW + 4, ry + (ROW_H - 12) / 2, theme.green);
         }
 
-        // Prayer time (right-aligned) — size 2
+        // Hourglass glyph for SNOOZED state
+        if (showHourglass) {
+            int nameW = tft.textWidth(Prayer::current.prayers[i].name);
+            drawHourglass(26 + nameW + 4, ry + (ROW_H - 12) / 2, theme.textSec);
+        }
+
+        // Strikethrough line for MISSED state
+        if (showStrikethrough) {
+            int nameW = tft.textWidth(Prayer::current.prayers[i].name);
+            int lineY = ry + ROW_H / 2;
+            tft.drawFastHLine(26, lineY, nameW, theme.red);
+            tft.drawFastHLine(26, lineY + 1, nameW, theme.red);
+        }
+
+        // Status pill badge (right of name)
+        if (pillText) {
+            drawPillBadge(100, ry + (ROW_H - 14) / 2, pillText, pillBg, pillFg);
+        }
+
+        // Prayer time (right-aligned) — FreeSansBold9pt for crispness
         const char* timeStr = Prayer::current.prayers[i].time;
-        tft.setTextSize(2);
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
         tft.setTextColor(fg, rowBg);
         int tw = tft.textWidth(timeStr);
-        tft.setCursor(SCREEN_W - tw - 24, ry + 5);
+        tft.setCursor(SCREEN_W - tw - 24, ry + ROW_H - 7);
         tft.print(timeStr);
 
-        // Separator line below each row (except last)
-        if (i < Prayer::PRAYER_COUNT - 1) {
+        // Reset font for separator
+        tft.setFreeFont(nullptr);
+
+        // Separator line below each row (except last visible)
+        if (visIdx < maxVisible - 1 && i < Prayer::PRAYER_COUNT - 1) {
             tft.drawFastHLine(20, ry + ROW_H - 2, SCREEN_W - 40, theme.separator);
         }
     }
 
     // Touch affordance chevrons
+    tft.setFreeFont(nullptr);
     tft.setTextSize(2);
     tft.setTextColor(theme.textDim, theme.bg);
     tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
@@ -787,7 +907,7 @@ static void drawPrayerPanel() {
     if (footerH > 0) {
         int bW = SCREEN_W / 2 - 18;
         int fy = SCREEN_H - footerH - 4;
-        int bH = footerH - 8;
+        int bH = footerH - 12;
 
         // "Prayed" button (green)
         tft.fillRoundRect(14, fy, bW, bH, 8, theme.green);
@@ -828,60 +948,105 @@ static void drawAzanScreen() {
         return;
     }
 
-    // Vertically centered content group: title(28) + gap(12) + name(38) + gap(8) + time(20) + gap(10) + instruction(16) = ~132
-    const int buttonH = 48;
-    const int buttonMargin = AZAN_BUTTON_MARGIN;
-    const int contentH = AZAN_CONTENT_H;
-    const int startY = AZAN_START_Y;
+    // ── Mosque silhouette icon (TFT primitives only, ~80×60px) ──
+    // Drawn using fillCircle, fillRect, fillTriangle
+    auto drawMosqueIcon = [](int cx, int cy, uint16_t col) {
+        // Central dome (upper half — draw circle then mask bottom)
+        tft.fillCircle(cx, cy + 10, 22, col);
+        tft.fillRect(cx - 22, cy + 10, 44, 22, theme.bg);  // mask bottom half
 
-    // Card behind content
-    tft.fillRoundRect(12, startY - 16, SCREEN_W - 24, contentH + 32, 16, theme.panel);
+        // Dome base
+        tft.fillRect(cx - 24, cy + 8, 48, 6, col);
 
-    // X dismiss button — top-right corner of card
+        // Left minaret
+        tft.fillRect(cx - 32, cy - 10, 8, 24, col);
+        tft.fillTriangle(cx - 36, cy - 10, cx - 24, cy - 10, cx - 28, cy - 22, col);
+
+        // Right minaret
+        tft.fillRect(cx + 24, cy - 10, 8, 24, col);
+        tft.fillTriangle(cx + 20, cy - 10, cx + 36, cy - 10, cx + 28, cy - 22, col);
+
+        // Crescent on top of dome (two overlapping circles)
+        tft.fillCircle(cx + 2, cy - 12, 6, col);
+        tft.fillCircle(cx - 1, cy - 12, 5, theme.bg);  // cut-out for crescent shape
+
+        // Base platform
+        tft.fillRect(cx - 36, cy + 13, 72, 4, col);
+    };
+
+    // Card background (full height)
+    const int cardX = 8, cardW = SCREEN_W - 16;
+    const int cardY = AZAN_START_Y;
+    const int cardH = SCREEN_H - AZAN_START_Y - AZAN_BUTTON_MARGIN - 6;
+    tft.fillRoundRect(cardX, cardY, cardW, cardH, 16, theme.panel);
+
+    // X dismiss button — top-right corner
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
     tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(SCREEN_W - 30, startY - 11);
+    tft.setCursor(SCREEN_W - 30, cardY + 6);
     tft.print("[X]");
 
-    // "Prayer Time" title
-    tft.setFreeFont(&FreeSansBold18pt7b);
-    tft.setTextColor(theme.accent, theme.panel);
-    String title = "Prayer Time";
-    int tw = tft.textWidth(title);
-    tft.setCursor((SCREEN_W - tw) / 2, startY + 24);
-    tft.print(title);
+    // Small subtitle above mosque
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.panel);
+    const char* subtitle = "Prayer Time";
+    int stw = tft.textWidth(subtitle);
+    tft.setCursor((SCREEN_W - stw) / 2, cardY + 14);
+    tft.print(subtitle);
 
-    // Prayer name (large)
+    // Mosque icon — animated glow (alternates gold/accent every 1s)
+    bool glowPhase = (millis() / 1000) % 2 == 0;
+    uint16_t mosqueColor = glowPhase ? theme.gold : theme.accent;
+    drawMosqueIcon(SCREEN_W / 2, cardY + 60, mosqueColor);
+
+    // Prayer name (large, centered)
     tft.setFreeFont(&FreeSansBold24pt7b);
     tft.setTextColor(theme.textPri, theme.panel);
     const char* name = Prayer::current.prayers[prayerIndex].name;
-    tw = tft.textWidth(name);
-    tft.setCursor((SCREEN_W - tw) / 2, startY + 74);
+    int tw = tft.textWidth(name);
+    tft.setCursor((SCREEN_W - tw) / 2, cardY + 122);
     tft.print(name);
 
-    // Prayer time
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
+    // Prayer time in gold
+    tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextColor(theme.gold, theme.panel);
     const char* timeStr = Prayer::current.prayers[prayerIndex].time;
     tw = tft.textWidth(timeStr);
-    tft.setCursor((SCREEN_W - tw) / 2, startY + 90);
+    tft.setCursor((SCREEN_W - tw) / 2, cardY + 158);
     tft.print(timeStr);
 
-    // Instruction text — size 2 for readability
+    // Instruction text
+    tft.setFreeFont(nullptr);
     tft.setTextSize(1);
     tft.setTextColor(theme.textSec, theme.panel);
     const char* instr = "Tap to mark prayed or snooze";
     tw = tft.textWidth(instr);
-    tft.setCursor((SCREEN_W - tw) / 2, startY + 116);
+    tft.setCursor((SCREEN_W - tw) / 2, cardY + 172);
     tft.print(instr);
 
-    // Buttons — centered labels
-    int buttonTop = SCREEN_H - buttonMargin;
+    // ── Progress bar (time remaining) ──
+    const int barX = 20, barW = SCREEN_W - 40, barH = 8;
+    const int barY = cardY + cardH - 20;
+    // Track (background)
+    tft.fillRoundRect(barX, barY, barW, barH, 4, theme.separator);
+    // Fill (proportional to time remaining)
+    if (azanScreenExpiry > 0 && millis() < azanScreenExpiry) {
+        float pct = (float)(azanScreenExpiry - millis()) / (float)PRAYER_FULLSCREEN_MS;
+        if (pct > 1.0f) pct = 1.0f;
+        int fillW = (int)(barW * pct);
+        if (fillW > 0) {
+            tft.fillRoundRect(barX, barY, fillW, barH, 4, theme.gold);
+        }
+    }
+
+    // ── Buttons ──
+    int buttonTop = SCREEN_H - AZAN_BUTTON_MARGIN;
     int bW = SCREEN_W / 2 - 18;
+    int buttonH = 48;
 
     tft.fillRoundRect(12, buttonTop, bW, buttonH, 10, theme.green);
+    tft.setFreeFont(nullptr);
     tft.setTextSize(2);
     tft.setTextColor(theme.textPri, theme.green);
     const char* pLabel = "Prayed";
@@ -906,6 +1071,48 @@ static void drawAzanScreen() {
     // Reset text state so subsequent partial draws start from a known baseline.
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
+}
+
+// ---------------------------------------------------------------------------
+// Partial Azan screen update — only redraws animated elements (mosque glow + progress bar)
+// Called from updateClock() to avoid full-screen redraw flicker
+// ---------------------------------------------------------------------------
+static void updateAzanAnimation() {
+    if (!azanScreenActive || azanPrayerIndex < 0) return;
+
+    // Re-draw mosque icon region with current glow phase
+    const int cardY = AZAN_START_Y;
+    const int cardH = SCREEN_H - AZAN_START_Y - AZAN_BUTTON_MARGIN - 6;
+    int cx = SCREEN_W / 2, cy = cardY + 60;
+
+    // Clear mosque area and redraw
+    tft.fillRect(cx - 40, cy - 26, 80, 46, theme.panel);
+    bool glowPhase = (millis() / 1000) % 2 == 0;
+    uint16_t mosqueColor = glowPhase ? theme.gold : theme.accent;
+    // Inline mosque redraw (same as lambda above)
+    tft.fillCircle(cx, cy + 10, 22, mosqueColor);
+    tft.fillRect(cx - 22, cy + 10, 44, 22, theme.panel);
+    tft.fillRect(cx - 24, cy + 8, 48, 6, mosqueColor);
+    tft.fillRect(cx - 32, cy - 10, 8, 24, mosqueColor);
+    tft.fillTriangle(cx - 36, cy - 10, cx - 24, cy - 10, cx - 28, cy - 22, mosqueColor);
+    tft.fillRect(cx + 24, cy - 10, 8, 24, mosqueColor);
+    tft.fillTriangle(cx + 20, cy - 10, cx + 36, cy - 10, cx + 28, cy - 22, mosqueColor);
+    tft.fillCircle(cx + 2, cy - 12, 6, mosqueColor);
+    tft.fillCircle(cx - 1, cy - 12, 5, theme.panel);
+    tft.fillRect(cx - 36, cy + 13, 72, 4, mosqueColor);
+
+    // Update progress bar
+    const int barX = 20, barW = SCREEN_W - 40, barH = 8;
+    const int barY = cardY + cardH - 20;
+    tft.fillRoundRect(barX, barY, barW, barH, 4, theme.separator);
+    if (azanScreenExpiry > 0 && millis() < azanScreenExpiry) {
+        float pct = (float)(azanScreenExpiry - millis()) / (float)PRAYER_FULLSCREEN_MS;
+        if (pct > 1.0f) pct = 1.0f;
+        int fillW = (int)(barW * pct);
+        if (fillW > 0) {
+            tft.fillRoundRect(barX, barY, fillW, barH, 4, theme.gold);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1147,41 +1354,98 @@ static void drawStocksPanel() {
 
 // ---------------------------------------------------------------------------
 // Notification banner (temporary overlay at top of panel)
+// Redesigned: taller (36px), slide-in animation, color-coded by event type
 // ---------------------------------------------------------------------------
 static unsigned long bannerExpiry = 0;
+static unsigned long bannerAnimStart = 0;
 static char bannerText[64] = {};
+static BannerStyle bannerStyle = BANNER_ACCENT;
+
+static uint16_t bannerBgColor() {
+    switch (bannerStyle) {
+        case BANNER_GOLD: return theme.gold;
+        case BANNER_RED:  return theme.red;
+        default:          return theme.accent;
+    }
+}
 
 static void drawBannerIfActive() {
     if (azanScreenActive) return;
     if (millis() >= bannerExpiry) return;
-    tft.fillRect(0, LAYOUT_PANEL_Y, SCREEN_W, 28, theme.accent);
-    tft.setFreeFont(nullptr);
-    tft.setTextColor(theme.textPri, theme.accent);
 
-    // Adaptive size: drop to size 1 if text would overflow the banner width.
-    tft.setTextSize(2);
-    int tw = tft.textWidth(bannerText);
-    int cursorY = LAYOUT_PANEL_Y + 6;
-    if (tw > SCREEN_W - 8) {
-        tft.setTextSize(1);
-        tw = tft.textWidth(bannerText);
-        cursorY = LAYOUT_PANEL_Y + 10;
+    uint16_t bg = bannerBgColor();
+
+    // Slide-in animation: over ~180ms (6 frames × 30ms), banner grows from 0 → BANNER_H
+    int h = BANNER_H;
+    unsigned long elapsed = millis() - bannerAnimStart;
+    if (elapsed < 180) {
+        h = (int)(BANNER_H * elapsed / 180);
+        if (h < 4) h = 4;
     }
 
-    // Disable wrap so an unexpectedly long string clips rather than overflowing the banner rect.
-    tft.setTextWrap(false);
-    tft.setCursor((SCREEN_W - tw) / 2, cursorY);
-    tft.print(bannerText);
-    tft.setTextWrap(true);
+    tft.fillRect(0, LAYOUT_PANEL_Y, SCREEN_W, h, bg);
 
-    // Keep global text state predictable for other widgets.
+    // 2px accent border at top edge (toast feel)
+    uint16_t borderColor = (bannerStyle == BANNER_ACCENT) ? theme.gold : theme.textPri;
+    tft.drawFastHLine(0, LAYOUT_PANEL_Y, SCREEN_W, borderColor);
+    tft.drawFastHLine(0, LAYOUT_PANEL_Y + 1, SCREEN_W, borderColor);
+
+    // Only draw text once animation is mostly done
+    if (h >= BANNER_H - 4) {
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textPri, bg);
+
+        int tw = tft.textWidth(bannerText);
+        int cursorY = LAYOUT_PANEL_Y + BANNER_H - 8;
+        if (tw > SCREEN_W - 16) {
+            // Fall back to default font for very long text
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            tw = tft.textWidth(bannerText);
+            cursorY = LAYOUT_PANEL_Y + BANNER_H / 2 + 2;
+        }
+
+        tft.setTextWrap(false);
+        tft.setCursor((SCREEN_W - tw) / 2, cursorY);
+        tft.print(bannerText);
+        tft.setTextWrap(true);
+    }
+
+    // Reset text state
+    tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
 
-static void showBanner(const char* text, uint32_t durationMs = 5000) {
+static void showBanner(const char* text, uint32_t durationMs = BANNER_DEFAULT_MS,
+                       BannerStyle style = BANNER_ACCENT) {
     strncpy(bannerText, text, sizeof(bannerText) - 1);
     bannerExpiry = millis() + durationMs;
+    bannerAnimStart = millis();
+    bannerStyle = style;
     drawBannerIfActive();  // paint immediately, no tick delay
+}
+
+// ---------------------------------------------------------------------------
+// Page transition animation — column-wipe effect
+// ---------------------------------------------------------------------------
+static void playPanelTransition(int direction) {
+    const int STEPS = 4;
+    const int STEP_W = SCREEN_W / STEPS;
+    const int DELAY_MS = 25;
+
+    for (int s = 0; s < STEPS; s++) {
+        int x;
+        if (direction > 0) {
+            // Wipe left-to-right
+            x = s * STEP_W;
+        } else {
+            // Wipe right-to-left
+            x = SCREEN_W - (s + 1) * STEP_W;
+        }
+        tft.fillRect(x, LAYOUT_PANEL_Y, STEP_W, LAYOUT_PANEL_H, theme.bg);
+        delay(DELAY_MS);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,7 +1480,8 @@ static void redraw(bool wifiOk, const String& ipAddr,
 // ---------------------------------------------------------------------------
 static void updateClock(const struct tm& t) {
     if (azanScreenActive) {
-        drawAzanScreen();
+        // Only update animated elements, not the full Azan screen
+        updateAzanAnimation();
         return;
     }
     drawHero(t);
@@ -1274,6 +1539,390 @@ static void showSplashStatus(const char* msg) {
     int tw = tft.textWidth(msg);
     tft.setCursor((SCREEN_W - tw) / 2, 190);
     tft.print(msg);
+}
+
+// ---------------------------------------------------------------------------
+// QR Code renderer (uses ricmoo/QRCode library)
+// ---------------------------------------------------------------------------
+static void drawQRCode(int cx, int cy, const char* data, int moduleSize = SETUP_QR_MODULE_PX) {
+    QRCode qrcode;
+    uint8_t qrcodeData[qrcode_getBufferSize(SETUP_QR_VERSION)];
+    qrcode_initText(&qrcode, qrcodeData, SETUP_QR_VERSION, ECC_LOW, data);
+
+    int qrSize = qrcode.size * moduleSize;
+    int startX = cx - qrSize / 2;
+    int startY = cy - qrSize / 2;
+
+    // White background with 4px quiet zone
+    tft.fillRect(startX - 4, startY - 4, qrSize + 8, qrSize + 8, TFT_WHITE);
+
+    // Draw modules
+    for (uint8_t y = 0; y < qrcode.size; y++) {
+        for (uint8_t x = 0; x < qrcode.size; x++) {
+            if (qrcode_getModule(&qrcode, x, y)) {
+                tft.fillRect(startX + x * moduleSize, startY + y * moduleSize,
+                             moduleSize, moduleSize, TFT_BLACK);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AP Setup Screen — shown on TFT when in AP/captive-portal mode
+// ---------------------------------------------------------------------------
+static void showAPSetupScreen() {
+    // Always use dark theme for setup (consistent, no prayer data yet)
+    Theme setupTheme = THEME_DARK;
+    tft.fillScreen(setupTheme.bg);
+
+    // Title
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.accent, setupTheme.bg);
+    const char* title = "DeskNexus Setup";
+    int tw = tft.textWidth(title);
+    tft.setCursor((SCREEN_W - tw) / 2, 22);
+    tft.print(title);
+
+    // Separator
+    tft.drawFastHLine(30, 30, SCREEN_W - 60, setupTheme.separator);
+
+    // WiFi QR code — centered (Version 4 = 33 modules, 3px each = 99px)
+    char qrStr[96];
+    snprintf(qrStr, sizeof(qrStr), "WIFI:T:WPA;S:%s;P:%s;;",
+             AP_SSID, Network::getApPassword());
+    drawQRCode(SCREEN_W / 2, 96, qrStr, SETUP_QR_MODULE_PX);
+
+    // Instructions below QR
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    int infoY = 156;
+
+    tft.setTextColor(setupTheme.textSec, setupTheme.bg);
+    const char* line1 = "Scan QR or join WiFi:";
+    tw = tft.textWidth(line1);
+    tft.setCursor((SCREEN_W - tw) / 2, infoY);
+    tft.print(line1);
+    infoY += 14;
+
+    // SSID (bold/accent)
+    tft.setTextSize(2);
+    tft.setTextColor(setupTheme.textPri, setupTheme.bg);
+    tw = tft.textWidth(AP_SSID);
+    tft.setCursor((SCREEN_W - tw) / 2, infoY);
+    tft.print(AP_SSID);
+    infoY += 22;
+
+    // Password
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textSec, setupTheme.bg);
+    char passLine[48];
+    snprintf(passLine, sizeof(passLine), "Password: %s", Network::getApPassword());
+    tw = tft.textWidth(passLine);
+    tft.setCursor((SCREEN_W - tw) / 2, infoY);
+    tft.print(passLine);
+    infoY += 16;
+
+    tft.setTextColor(setupTheme.gold, setupTheme.bg);
+    const char* autoOpen = "Portal opens automatically";
+    tw = tft.textWidth(autoOpen);
+    tft.setCursor((SCREEN_W - tw) / 2, infoY);
+    tft.print(autoOpen);
+
+    // Bottom: IP address
+    tft.drawFastHLine(30, 280, SCREEN_W - 60, setupTheme.separator);
+    tft.setTextSize(2);
+    tft.setTextColor(setupTheme.accent, setupTheme.bg);
+    const char* ip = "192.168.4.1";
+    tw = tft.textWidth(ip);
+    tft.setCursor((SCREEN_W - tw) / 2, 290);
+    tft.print(ip);
+
+    // Waiting indicator
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textDim, setupTheme.bg);
+    const char* wait = "Waiting for connection...";
+    tw = tft.textWidth(wait);
+    tft.setCursor((SCREEN_W - tw) / 2, 310);
+    tft.print(wait);
+}
+
+// Update the "waiting" indicator with client count (call periodically in AP loop)
+static void updateAPSetupWaiting() {
+    Theme setupTheme = THEME_DARK;
+    int clients = WiFi.softAPgetStationNum();
+    tft.fillRect(0, 306, SCREEN_W, 14, setupTheme.bg);
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(clients > 0 ? setupTheme.gold : setupTheme.textDim, setupTheme.bg);
+
+    char msg[48];
+    if (clients > 0) {
+        snprintf(msg, sizeof(msg), "%d device(s) connected", clients);
+    } else {
+        snprintf(msg, sizeof(msg), "Waiting for connection...");
+    }
+    int tw = tft.textWidth(msg);
+    tft.setCursor((SCREEN_W - tw) / 2, 310);
+    tft.print(msg);
+}
+
+// ---------------------------------------------------------------------------
+// Connecting Screen — shown during WiFi STA connection attempts
+// ---------------------------------------------------------------------------
+static void showConnectingScreen(const char* ssid) {
+    Theme setupTheme = THEME_DARK;
+    tft.fillScreen(setupTheme.bg);
+
+    // Card background
+    tft.fillRoundRect(20, 80, SCREEN_W - 40, 160, 14, setupTheme.panel);
+
+    // Title
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textPri, setupTheme.panel);
+    const char* title = "Connecting...";
+    int tw = tft.textWidth(title);
+    tft.setCursor((SCREEN_W - tw) / 2, 114);
+    tft.print(title);
+
+    // SSID
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(2);
+    tft.setTextColor(setupTheme.accent, setupTheme.panel);
+    // Truncate long SSIDs
+    char truncSSID[20];
+    strncpy(truncSSID, ssid, sizeof(truncSSID) - 1);
+    truncSSID[sizeof(truncSSID) - 1] = '\0';
+    tw = tft.textWidth(truncSSID);
+    tft.setCursor((SCREEN_W - tw) / 2, 135);
+    tft.print(truncSSID);
+
+    // Progress bar outline
+    int barX = 40, barY = 170, barW = SCREEN_W - 80, barH = 12;
+    tft.drawRoundRect(barX, barY, barW, barH, 4, setupTheme.separator);
+}
+
+static void updateConnectingProgress(int percent) {
+    Theme setupTheme = THEME_DARK;
+    int barX = 41, barY = 171, barW = SCREEN_W - 82, barH = 10;
+    int fillW = barW * percent / 100;
+    if (fillW > barW) fillW = barW;
+    tft.fillRoundRect(barX, barY, fillW, barH, 3, setupTheme.accent);
+
+    // Percentage text
+    tft.fillRect(barX, barY + 16, barW, 14, setupTheme.panel);
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textSec, setupTheme.panel);
+    char msg[8];
+    snprintf(msg, sizeof(msg), "%d%%", percent);
+    int tw = tft.textWidth(msg);
+    tft.setCursor((SCREEN_W - tw) / 2, barY + 18);
+    tft.print(msg);
+}
+
+static void showConnectionResult(bool success, const char* detail) {
+    Theme setupTheme = THEME_DARK;
+    tft.fillScreen(setupTheme.bg);
+
+    // Card
+    tft.fillRoundRect(20, 70, SCREEN_W - 40, 180, 14, setupTheme.panel);
+
+    if (success) {
+        // Green checkmark circle
+        tft.fillCircle(SCREEN_W / 2, 120, 24, setupTheme.green);
+        // Checkmark lines (white)
+        tft.drawLine(SCREEN_W/2 - 10, 120, SCREEN_W/2 - 2, 130, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 - 2, 130, SCREEN_W/2 + 12, 112, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 - 9, 120, SCREEN_W/2 - 1, 130, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 - 1, 130, SCREEN_W/2 + 11, 112, TFT_WHITE);
+
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
+        tft.setTextColor(setupTheme.green, setupTheme.panel);
+        const char* ok = "Connected!";
+        int tw = tft.textWidth(ok);
+        tft.setCursor((SCREEN_W - tw) / 2, 170);
+        tft.print(ok);
+
+        // IP address
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(2);
+        tft.setTextColor(setupTheme.textPri, setupTheme.panel);
+        int tw2 = tft.textWidth(detail);
+        tft.setCursor((SCREEN_W - tw2) / 2, 190);
+        tft.print(detail);
+    } else {
+        // Red X circle
+        tft.fillCircle(SCREEN_W / 2, 120, 24, setupTheme.red);
+        tft.drawLine(SCREEN_W/2 - 10, 110, SCREEN_W/2 + 10, 130, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 + 10, 110, SCREEN_W/2 - 10, 130, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 - 9, 110, SCREEN_W/2 + 11, 130, TFT_WHITE);
+        tft.drawLine(SCREEN_W/2 + 11, 110, SCREEN_W/2 - 9, 130, TFT_WHITE);
+
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
+        tft.setTextColor(setupTheme.red, setupTheme.panel);
+        const char* fail = "Connection Failed";
+        int tw = tft.textWidth(fail);
+        tft.setCursor((SCREEN_W - tw) / 2, 170);
+        tft.print(fail);
+
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+        tft.setTextColor(setupTheme.textSec, setupTheme.panel);
+        const char* retry = "Starting setup mode...";
+        int tw2 = tft.textWidth(retry);
+        tft.setCursor((SCREEN_W - tw2) / 2, 195);
+        tft.print(retry);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Setup wizard state machine
+// ---------------------------------------------------------------------------
+enum WizardState {
+    WIZ_WELCOME,
+    WIZ_WIFI_QR,
+    WIZ_WAITING,
+    WIZ_CONNECTING,
+    WIZ_SUCCESS,
+    WIZ_CONFIG_HINT,
+    WIZ_DONE
+};
+
+static WizardState wizardState = WIZ_WELCOME;
+
+static void drawWizardWelcome() {
+    Theme setupTheme = THEME_DARK;
+    tft.fillScreen(setupTheme.bg);
+
+    // Geometric "desk" icon — simple monitor shape
+    int cx = SCREEN_W / 2;
+    int iy = 80;
+    tft.drawRoundRect(cx - 36, iy, 72, 48, 6, setupTheme.accent);    // screen outline
+    tft.drawFastHLine(cx - 8, iy + 48, 16, setupTheme.accent);       // stand neck
+    tft.drawFastVLine(cx, iy + 48, 12, setupTheme.accent);            // stand pole
+    tft.drawFastHLine(cx - 16, iy + 60, 32, setupTheme.accent);       // stand base
+    // Small dot "power" light
+    tft.fillCircle(cx, iy + 42, 2, setupTheme.green);
+
+    // Title
+    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textPri, setupTheme.bg);
+    const char* title = "Welcome";
+    int tw = tft.textWidth(title);
+    tft.setCursor((SCREEN_W - tw) / 2, 175);
+    tft.print(title);
+
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextColor(setupTheme.accent, setupTheme.bg);
+    const char* sub = "DeskNexus";
+    tw = tft.textWidth(sub);
+    tft.setCursor((SCREEN_W - tw) / 2, 200);
+    tft.print(sub);
+
+    // Instruction
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textDim, setupTheme.bg);
+    const char* hint = "Tap screen to begin setup";
+    tw = tft.textWidth(hint);
+    tft.setCursor((SCREEN_W - tw) / 2, 240);
+    tft.print(hint);
+
+    // Version
+    tft.setTextColor(setupTheme.textDim, setupTheme.bg);
+    const char* ver = "v1.0";
+    tw = tft.textWidth(ver);
+    tft.setCursor((SCREEN_W - tw) / 2, 310);
+    tft.print(ver);
+}
+
+static void drawWizardConfigHint() {
+    Theme setupTheme = THEME_DARK;
+    tft.fillScreen(setupTheme.bg);
+
+    // Card
+    tft.fillRoundRect(16, 40, SCREEN_W - 32, 240, 14, setupTheme.panel);
+
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textPri, setupTheme.panel);
+    const char* title = "Customize Your Desk";
+    int tw = tft.textWidth(title);
+    tft.setCursor((SCREEN_W - tw) / 2, 74);
+    tft.print(title);
+
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textSec, setupTheme.panel);
+    const char* line1 = "Open a browser and visit:";
+    tw = tft.textWidth(line1);
+    tft.setCursor((SCREEN_W - tw) / 2, 100);
+    tft.print(line1);
+
+    // Settings URL
+    tft.setTextSize(2);
+    tft.setTextColor(setupTheme.accent, setupTheme.panel);
+    String addr = Network::localAddress();
+    tw = tft.textWidth(addr);
+    tft.setCursor((SCREEN_W - tw) / 2, 120);
+    tft.print(addr);
+
+    // QR for settings URL
+    String settingsUrl = "http://" + addr + "/settings";
+    drawQRCode(SCREEN_W / 2, 190, settingsUrl.c_str(), 2);
+
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(setupTheme.textDim, setupTheme.panel);
+    const char* hint = "Set city, stocks, prayer method";
+    tw = tft.textWidth(hint);
+    tft.setCursor((SCREEN_W - tw) / 2, 248);
+    tft.print(hint);
+
+    // Auto-advance hint at bottom
+    tft.setTextColor(setupTheme.textDim, setupTheme.bg);
+    const char* auto_msg = "Starting in 8 seconds...";
+    tw = tft.textWidth(auto_msg);
+    tft.setCursor((SCREEN_W - tw) / 2, 310);
+    tft.print(auto_msg);
+}
+
+// Persist wizard state to NVS (survives restart after WiFi save)
+static void saveWizardState(WizardState state) {
+    Preferences prefs;
+    prefs.begin("settings", false);
+    prefs.putInt(WIZARD_STATE_NVS_KEY, (int)state);
+    prefs.end();
+}
+
+static WizardState loadWizardState() {
+    Preferences prefs;
+    prefs.begin("settings", true);
+    int s = prefs.getInt(WIZARD_STATE_NVS_KEY, (int)WIZ_WELCOME);
+    prefs.end();
+    if (s < WIZ_WELCOME || s > WIZ_DONE) return WIZ_WELCOME;
+    return (WizardState)s;
+}
+
+static bool isFirstBoot() {
+    Preferences prefs;
+    prefs.begin("settings", true);
+    bool first = prefs.getBool(FIRST_BOOT_NVS_KEY, true);
+    prefs.end();
+    return first;
+}
+
+static void clearFirstBoot() {
+    Preferences prefs;
+    prefs.begin("settings", false);
+    prefs.putBool(FIRST_BOOT_NVS_KEY, false);
+    prefs.putInt(WIZARD_STATE_NVS_KEY, (int)WIZ_DONE);
+    prefs.end();
 }
 
 } // namespace UI
