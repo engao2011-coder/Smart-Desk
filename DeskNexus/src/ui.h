@@ -116,6 +116,7 @@ static bool     dimmed      = false;
 static bool     azanScreenActive = false;
 static int      azanPrayerIndex = -1;
 static unsigned long azanScreenExpiry = 0;
+static int      prayerScrollOffset = 0;
 
 // Touch & carousel timing
 static unsigned long lastTouchMs        = 0;
@@ -380,7 +381,7 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         (int)ty >= LAYOUT_PANEL_Y && (int)ty < (SCREEN_H - 50)) {
         const int ROW_H  = 26;
         const int START_Y = LAYOUT_PANEL_Y + 14;
-        int tappedIdx = ((int)ty - START_Y) / ROW_H;
+        int tappedIdx = ((int)ty - START_Y) / ROW_H + prayerScrollOffset;
         if (tappedIdx >= 0 && tappedIdx < Prayer::PRAYER_COUNT) {
             if (Prayer::rowStateForIndex(tappedIdx) == Prayer::ROW_MISSED) {
                 Prayer::markPrayed(tappedIdx);
@@ -666,9 +667,28 @@ static void drawPrayerPanel() {
     const int ROW_H  = 26;
     const int START_Y = LAYOUT_PANEL_Y + 14;
 
-    for (int i = 0; i < Prayer::PRAYER_COUNT; i++) {
+    // Smart scroll: when footer is active, shift the visible window so the
+    // pending prayer (and those after it) remain on screen.
+    const int maxVisible = (LAYOUT_PANEL_H - 14 - footerH - 10) / ROW_H;
+    if (footerH > 0 && maxVisible < Prayer::PRAYER_COUNT) {
+        prayerScrollOffset = max(0, min(pendingForFooter - 1,
+                                        Prayer::PRAYER_COUNT - maxVisible));
+    } else {
+        prayerScrollOffset = 0;
+    }
+
+    // Hint that earlier prayers are scrolled off the top
+    if (prayerScrollOffset > 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.panel);
+        int dotW = tft.textWidth("...");
+        tft.setCursor((SCREEN_W - dotW) / 2, START_Y - 1);
+        tft.print("...");
+    }
+
+    for (int i = prayerScrollOffset; i < Prayer::PRAYER_COUNT; i++) {
         Prayer::RowState rowState = Prayer::rowStateForIndex(i);
-        int ry = START_Y + i * ROW_H;
+        int ry = START_Y + (i - prayerScrollOffset) * ROW_H;
         if (ry + ROW_H > (LAYOUT_PANEL_Y + LAYOUT_PANEL_H - footerH - 10)) break;
 
         uint16_t rowBg = theme.panel;
