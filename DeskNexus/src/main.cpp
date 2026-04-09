@@ -48,6 +48,7 @@
 #include "prayer.h"
 #include "stocks.h"
 #include "time_sync.h"
+#include "ota.h"
 #include "ui.h"
 
 // ── Touchscreen ───────────────────────────────────────────────────────────
@@ -217,6 +218,9 @@ void setup() {
     bool wifiOk = Network::begin();
 
     if (wifiOk) {
+        // Start ArduinoOTA so firmware can be pushed wirelessly from PlatformIO.
+        OTA::begin();
+
         UI::showSplashStatus("Syncing time...");
         TimeSync::apply(Settings::utcOffset);
 
@@ -278,6 +282,13 @@ void loop() {
 
     // ── Web portal handler (AP mode) ──────────────────────────────────────
     Network::handle();
+
+    // ── ArduinoOTA handler ────────────────────────────────────────────────
+    // Start OTA lazily on first WiFi connect (covers reconnect after AP mode).
+    if (Network::isConnected() && !OTA::isStarted()) {
+        OTA::begin();
+    }
+    OTA::handle();
 
     // ── Touch input (non-blocking debounce inside handleTouch) ────────────
     if (touch.tirqTouched() && touch.touched()) {

@@ -21,6 +21,16 @@
 #define TOUCH_IRQ_PIN  36   // XPT2046 interrupt (optional)
 
 // ---------------------------------------------------------------------------
+// OTA (Over-The-Air) firmware updates
+// Two methods are available (see ota.h / network.h):
+//   • ArduinoOTA — push via PlatformIO / Arduino IDE (UDP port 3232)
+//       pio run -e cyd-ota -t upload --upload-port desknexus.local
+//   • HTTP OTA   — browser upload at http://desknexus.local/update
+// Set a password to protect OTA. Leave undefined for password-free OTA.
+// ---------------------------------------------------------------------------
+// #define OTA_PASSWORD  "your_ota_password"
+
+// ---------------------------------------------------------------------------
 // WiFi — Hybrid mode
 // Leave WIFI_SSID empty ("") to always start in AP/setup mode first.
 // The user can configure credentials through the built-in web portal,
