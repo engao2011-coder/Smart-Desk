@@ -823,6 +823,8 @@ static void handleRoot() {
 }
 
 static void handleSettings() {
+    server.sendHeader("Cache-Control", "no-store, no-cache");
+    server.sendHeader("Pragma", "no-cache");
     server.send(200, "text/html", settingsPage());
 }
 
@@ -912,6 +914,8 @@ static void handleResetSettings() {
 }
 
 static void handleSetup() {
+    server.sendHeader("Cache-Control", "no-store, no-cache");
+    server.sendHeader("Pragma", "no-cache");
     server.send(200, "text/html", portalPage());
 }
 
@@ -984,7 +988,11 @@ static void startServer() {
         server.on("/save-settings",  HTTP_POST, handleSaveSettings);
         server.on("/reset-settings", HTTP_GET,  handleResetSettings);
         server.on("/forget-network", HTTP_POST, handleForgetNetwork);
-        server.on("/update",         HTTP_GET,  []() { server.send(200, "text/html", otaPage()); });
+        server.on("/update",         HTTP_GET,  []() {
+            server.sendHeader("Cache-Control", "no-store, no-cache");
+            server.sendHeader("Pragma", "no-cache");
+            server.send(200, "text/html", otaPage());
+        });
         server.on("/do-update",      HTTP_POST, handleOtaComplete, handleOtaUpload);
         server.on("/generate_204",   HTTP_GET,  handleCaptiveProbe);
         server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
