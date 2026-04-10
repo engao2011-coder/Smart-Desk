@@ -153,6 +153,8 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 // ---------------------------------------------------------------------------
 #define CAROUSEL_INTERVAL_MS  30000  // Auto-switch pages every 30 s
 #define CAROUSEL_PAUSE_MS     45000   // Pause carousel 45 s after manual touch
+#define FORECAST_DISPLAY_MS   15000   // Auto-triggered forecast page shows for 15 s
+#define CAROUSEL_IDLE_RETURN_MS 60000 // Return to Home page after 60 s of no touch
 
 // Touch calibration values for the CYD XPT2046 in portrait mode.
 // Run the TFT_eSPI Touch_calibrate example and paste results here.

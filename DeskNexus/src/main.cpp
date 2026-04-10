@@ -504,7 +504,7 @@ void loop() {
                     checkWeatherForecastAlerts();
                     // Even without alert, briefly show forecast after hourly update
                     if (UI::activePage != PAGE_FORECAST) {
-                        UI::pauseCarousel();
+                        UI::pauseCarouselFor(FORECAST_DISPLAY_MS);
                         UI::activePage = PAGE_FORECAST;
                         UI::needsRedraw = true;
                     }
@@ -539,9 +539,16 @@ void loop() {
         lastPrayerAlert = now;
         UI::updatePrayerUiState();   // expire azan screen if needed
         processPrayerReminderEvent();
-        if (UI::shouldAutoAdvance()) {
-            UI::advancePage();       // sets needsRedraw=true
-        }
+    }
+
+    // ── Carousel auto-advance (checked every loop iteration) ──────────────
+    if (UI::shouldAutoAdvance()) {
+        UI::advancePage();           // sets needsRedraw=true
+    }
+
+    // ── Idle return to Home page ──────────────────────────────────────────
+    if (UI::shouldReturnToHome()) {
+        UI::returnToHome();
     }
 
     delay(10);  // yield to FreeRTOS scheduler

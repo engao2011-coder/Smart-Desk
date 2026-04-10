@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "config.h"
@@ -43,6 +44,10 @@ static Quote quotes[MAX_STOCKS];
 static int   fetchIndex   = 0;       // which symbol to fetch next
 static int   displayIndex = 0;       // which quote to show on screen
 
+static constexpr unsigned long FETCH_RETRY_INTERVAL_MS = 60000;  // 60 s backoff after failure
+static unsigned long lastFetchAttemptMs = 0;
+static bool          lastFetchOk        = true;
+
 // ---------------------------------------------------------------------------
 // Count configured symbols
 // ---------------------------------------------------------------------------
@@ -67,8 +72,11 @@ static bool fetchOne(int idx) {
     String url = "https://query1.finance.yahoo.com/v8/finance/chart/"
                  + String(sym) + "?range=1d&interval=1d";
 
+    WiFiClientSecure client;
+    client.setInsecure();            // skip cert verification (matches weather/prayer)
+
     HTTPClient http;
-    http.begin(url);
+    http.begin(client, url);
     http.setTimeout(10000);
     // Yahoo Finance requires a User-Agent header; empty UA can get 401/429
     http.setUserAgent("Mozilla/5.0");
@@ -153,11 +161,20 @@ static bool fetchNext() {
     int n = symbolCount();
     if (n == 0) return false;
 
+    // Back off after a failed fetch to avoid hammering Yahoo
+    if (!lastFetchOk &&
+        lastFetchAttemptMs > 0 &&
+        (millis() - lastFetchAttemptMs) < FETCH_RETRY_INTERVAL_MS) {
+        return false;
+    }
+
     // Find the next valid slot
     for (int attempt = 0; attempt < MAX_STOCKS; attempt++) {
         fetchIndex = (fetchIndex % MAX_STOCKS);
         if (strlen(Settings::stockSymbols[fetchIndex]) > 0) {
+            lastFetchAttemptMs = millis();
             bool ok = fetchOne(fetchIndex);
+            lastFetchOk = ok;
             fetchIndex++;
             return ok;
         }
@@ -186,6 +203,24 @@ static bool hasAlert() {
         if (quotes[i].valid && quotes[i].alertTriggered) return true;
     }
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// Return the index of the quote with the largest |changePct| (top mover).
+// Returns -1 if no valid quotes exist.
+// ---------------------------------------------------------------------------
+static int topMoverIndex() {
+    int best = -1;
+    float bestAbs = -1.0f;
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        if (!quotes[i].valid) continue;
+        float a = fabsf(quotes[i].changePct);
+        if (a > bestAbs) {
+            bestAbs = a;
+            best = i;
+        }
+    }
+    return best;
 }
 
 // ---------------------------------------------------------------------------

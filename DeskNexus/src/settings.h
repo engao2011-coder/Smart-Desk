@@ -42,6 +42,9 @@ static long utcOffset = NTP_UTC_OFFSET_SEC;
 // false => light theme
 static bool themeDark = true;
 
+// Theme mode: 0 = auto (dark at night based on prayer times), 1 = always dark, 2 = always light
+static int themeMode = 0;
+
 // When true, auto-detect will NOT overwrite city/country (user set it manually)
 static bool cityManual = false;
 
@@ -67,12 +70,26 @@ static int  prayerSnoozeIndex = -1;
 static long prayerSnoozeUntil = 0;
 static int  prayerSnoozeCount = 0;
 
+// NVS schema version — bump when key names/formats change between firmware releases.
+// On mismatch the settings namespace is wiped and re-initialised from config.h defaults.
+static constexpr int NVS_VERSION = 1;
+
 // ---------------------------------------------------------------------------
 // Load from NVS (falls back to compiled defaults when key is absent)
 // ---------------------------------------------------------------------------
 static void load() {
     Preferences prefs;
-    prefs.begin("settings", true);  // read-only
+    prefs.begin("settings", false);  // read-write (needed for potential migration)
+
+    int storedVer = prefs.getInt("nvsVer", 0);
+    if (storedVer != NVS_VERSION) {
+        Serial.printf("[Settings] NVS version mismatch (stored=%d, expected=%d) — resetting.\n",
+                      storedVer, NVS_VERSION);
+        prefs.clear();
+        prefs.putInt("nvsVer", NVS_VERSION);
+        prefs.end();
+        return;  // fields keep their compiled defaults
+    }
 
     prefs.getString("city",      city,      sizeof(city));
     prefs.getString("country",   country,   sizeof(country));
@@ -88,6 +105,7 @@ static void load() {
 
     utcOffset = prefs.getLong("utcOff", utcOffset);
     themeDark = prefs.getBool("themeDark", themeDark);
+    themeMode = prefs.getInt("themeM", themeMode);
 
     weatherFetchYear  = prefs.getInt("wFY", weatherFetchYear);
     weatherFetchMonth = prefs.getInt("wFM", weatherFetchMonth);
@@ -123,6 +141,7 @@ static void save() {
     Preferences prefs;
     prefs.begin("settings", false);  // read-write
 
+    prefs.putInt("nvsVer", NVS_VERSION);
     prefs.putString("city",      city);
     prefs.putString("country",   country);
     prefs.putString("owmKey",    owmApiKey);
@@ -137,6 +156,7 @@ static void save() {
 
     prefs.putLong("utcOff", utcOffset);
     prefs.putBool("themeDark", themeDark);
+    prefs.putInt("themeM", themeMode);
 
     prefs.putInt("wFY", weatherFetchYear);
     prefs.putInt("wFM", weatherFetchMonth);
@@ -184,6 +204,7 @@ static void resetToDefaults() {
     }
     utcOffset = NTP_UTC_OFFSET_SEC;
     themeDark = true;
+    themeMode = 0;
 
     weatherFetchYear  = -1;
     weatherFetchMonth = -1;

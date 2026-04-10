@@ -436,7 +436,6 @@ static String settingsPage() {
        display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:16px 0}
   .card{background:#16213e;border-radius:12px;padding:32px;max-width:440px;width:90%;box-shadow:0 4px 24px #0005}
   h2{margin:0 0 24px;color:#e94560;text-align:center}
-  h3{margin:20px 0 8px;color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px}
   label{display:block;margin:10px 0 3px;font-size:.85rem;color:#c618}
   select,input[type=text],input[type=number],input[type=password]{
     width:100%;padding:9px;border:none;border-radius:6px;
@@ -449,6 +448,13 @@ static String settingsPage() {
   .link{text-align:center;margin-top:14px}
   .link a{color:#4ecca3;font-size:.85rem}
   .rst{display:block;text-align:center;margin-top:10px;color:#e94560;font-size:.8rem}
+  .hint{font-size:.78rem;color:#9bd;line-height:1.4;margin:4px 0 0}
+  details{margin:12px 0 4px}
+  summary{color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px;
+          cursor:pointer;font-weight:bold;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:'▸ ';font-size:.9rem}
+  details[open]>summary::before{content:'▾ '}
 </style>
 </head>
 <body>
@@ -459,7 +465,8 @@ static String settingsPage() {
     html += String(csrfToken);
     html += R"rawhtml(">
 
-    <h3>Location</h3>
+    <details open>
+    <summary>Location &amp; Time</summary>
     <div class="row">
       <div>
         <label for="city">City</label>
@@ -485,42 +492,9 @@ static String settingsPage() {
       </div>
     </div>
 
-    <div class="row">
-      <div>
-        <label for="units">Units</label>
-        <select id="units" name="units">
-          <option value="metric")rawhtml";
-    if (String(Settings::owmUnits) == "metric") html += " selected";
-    html += R"rawhtml(>Metric (°C)</option>
-          <option value="imperial")rawhtml";
-    if (String(Settings::owmUnits) == "imperial") html += " selected";
-    html += R"rawhtml(>Imperial (°F)</option>
-        </select>
-      </div>
-      <div>
-        <label for="method">Prayer Method</label>
-        <select id="method" name="method">)rawhtml";
-
-    struct { int id; const char* name; } methods[] = {
-        {1,"Muslim World League"},{2,"ISNA"},{3,"Egypt"},
-        {4,"Makkah (Umm Al-Qura)"},{5,"Karachi"},
-        {8,"Gulf Region"},{16,"Turkey"},{17,"Tehran"}
-    };
-    for (auto& m : methods) {
-        html += "<option value=\"" + String(m.id) + "\"";
-        if (Settings::prayerMethod == m.id) html += " selected";
-        html += ">" + String(m.name) + "</option>";
-    }
-
-    html += R"rawhtml(
-        </select>
-      </div>
-    </div>
-
     <label for="utc">Timezone (UTC Offset)</label>
     <select id="utc" name="utc">)rawhtml";
 
-    // Common UTC offsets: label → seconds.  Non-standard half/quarter-hour zones included.
     struct { long sec; const char* label; } tzOpts[] = {
         {-43200, "UTC-12"}, {-39600, "UTC-11"}, {-36000, "UTC-10"},
         {-34200, "UTC-9:30"}, {-32400, "UTC-9"}, {-28800, "UTC-8"},
@@ -543,54 +517,100 @@ static String settingsPage() {
         if (Settings::utcOffset == tz.sec) { html += " selected"; matchedTz = true; }
         html += ">" + String(tz.label) + "</option>\n";
     }
-    // If the current value doesn't match any standard entry, show it as Custom
     if (!matchedTz) {
         html += "<option value=\"" + String(Settings::utcOffset) + "\" selected>Custom (" + String(Settings::utcOffset) + " s)</option>\n";
     }
     html += R"rawhtml(    </select>
-        <p style="font-size:.8rem;color:#9bd;line-height:1.4;margin:6px 0 0">
-            Auto-detect status: )rawhtml";
+        <p class="hint">
+            Auto-detect: )rawhtml";
         html += String(Settings::autoDetectStatus);
-        html += R"rawhtml(<br>
-            Last result: )rawhtml";
-        html += Settings::autoDetectLastOk ? "Success" : "Failure";
-        html += R"rawhtml(
+        html += " (";
+        html += Settings::autoDetectLastOk ? "OK" : "Failed";
+        html += R"rawhtml()
         </p>
+    </details>
 
-        <h3>Theme</h3>
-        <label for="theme">Display Theme</label>
-        <select id="theme" name="theme">
-            <option value="dark")rawhtml";
-        if (Settings::themeDark) html += " selected";
-        html += R"rawhtml(>Dark</option>
-            <option value="light")rawhtml";
-        if (!Settings::themeDark) html += " selected";
-        html += R"rawhtml(>Light</option>
+    <details open>
+    <summary>Weather</summary>
+    <label for="owmkey">OpenWeatherMap API Key</label>
+    <input type="password" id="owmkey" name="owmkey" maxlength="46" value=")rawhtml";
+    html += String(Settings::owmApiKey);
+    html += R"rawhtml(">
+    <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank" style="color:#4ecca3">openweathermap.org/appid</a>. Weather is optional — clock, prayers and stocks work without it.</p>
+    <div class="row">
+      <div>
+        <label for="units">Units</label>
+        <select id="units" name="units">
+          <option value="metric")rawhtml";
+    if (String(Settings::owmUnits) == "metric") html += " selected";
+    html += R"rawhtml(>Metric (°C)</option>
+          <option value="imperial")rawhtml";
+    if (String(Settings::owmUnits) == "imperial") html += " selected";
+    html += R"rawhtml(>Imperial (°F)</option>
         </select>
+      </div>
+    </div>
+    </details>
 
-    <h3>Stocks</h3>)rawhtml";
+    <details open>
+    <summary>Prayer Times</summary>
+    <label for="method">Calculation Method</label>
+    <select id="method" name="method">)rawhtml";
+
+    struct { int id; const char* name; } methods[] = {
+        {1,"Muslim World League"},{2,"ISNA (North America)"},
+        {3,"Egyptian General Authority"},{4,"Makkah (Umm Al-Qura)"},
+        {5,"Univ. of Islamic Sciences, Karachi"},
+        {8,"Gulf Region"},{16,"Diyanet (Turkey)"},{17,"Tehran"}
+    };
+    for (auto& m : methods) {
+        html += "<option value=\"" + String(m.id) + "\"";
+        if (Settings::prayerMethod == m.id) html += " selected";
+        html += ">" + String(m.name) + "</option>";
+    }
+
+    html += R"rawhtml(
+    </select>
+    <p class="hint">Choose the method your local mosque follows. Default: Makkah (Umm Al-Qura) for Saudi Arabia.</p>
+    </details>
+
+    <details>
+    <summary>Display</summary>
+    <label for="theme">Theme</label>
+    <select id="theme" name="theme">
+        <option value="auto")rawhtml";
+    if (Settings::themeMode == 0) html += " selected";
+    html += R"rawhtml(>Auto (dark at night)</option>
+        <option value="dark")rawhtml";
+    if (Settings::themeMode == 1) html += " selected";
+    html += R"rawhtml(>Always Dark</option>
+        <option value="light")rawhtml";
+    if (Settings::themeMode == 2) html += " selected";
+    html += R"rawhtml(>Always Light</option>
+    </select>
+    </details>
+
+    <details>
+    <summary>Stocks</summary>
+    <p class="hint">Yahoo Finance symbols. Leave empty to disable. Example: IUSE.L, AAPL, MSFT</p>)rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
         html += "<label>Symbol " + String(i + 1) + "</label>";
         html += "<input type=\"text\" name=\"stk" + String(i) +
                 "\" maxlength=\"23\" value=\"" + String(Settings::stockSymbols[i]) +
-                "\" placeholder=\"e.g. IUSE or IUSE:LSE\" style=\"text-transform:uppercase\">";
+                "\" placeholder=\"e.g. IUSE.L\" style=\"text-transform:uppercase\">";
     }
 
     html += R"rawhtml(
-
-    <h3>API Keys</h3>
-    <label for="owmkey">OpenWeatherMap Key</label>
-    <input type="password" id="owmkey" name="owmkey" maxlength="46" value=")rawhtml";
-    html += String(Settings::owmApiKey);
-    html += R"rawhtml(">
+    </details>
 
     <input type="submit" value="Save Settings">
   </form>
 
-  <h3 style="margin-top:28px;color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px">Saved Wi-Fi Networks</h3>)rawhtml";
+  <details style="margin-top:20px">
+  <summary>Saved Wi-Fi Networks</summary>)rawhtml";
     if (savedNetworkCount == 0) {
-        html += "<p style=\"color:#9bd;font-size:.85rem\">No saved networks.</p>";
+        html += "<p class=\"hint\">No saved networks.</p>";
     } else {
         for (int i = 0; i < savedNetworkCount; i++) {
             String sSafe = htmlEscape(String(savedNetworks[i].ssid));
@@ -604,6 +624,7 @@ static String settingsPage() {
         }
     }
     html += R"rawhtml(
+  </details>
   <div class="link"><a href="/">&#8592; Back to Status</a></div>
   <a class="rst" href="/reset-settings?csrf=)rawhtml";
     html += String(csrfToken);
@@ -779,8 +800,10 @@ static void handleOtaComplete() {
         return;
     }
     if (!_otaUpdateOk || Update.hasError()) {
+        // Log detailed error to serial only — don't expose partition info to browser
         String err = _otaErrorMsg.length() > 0 ? _otaErrorMsg : String(Update.errorString());
-        server.send(500, "text/plain", "Update failed: " + err);
+        Serial.printf("[OTA] Update failed: %s\n", err.c_str());
+        server.send(500, "text/plain", "Update failed. Check device serial log for details.");
     } else {
         server.send(200, "text/plain", "OK");
         delay(500);
@@ -836,10 +859,11 @@ static void handleSaveSettings() {
     long utc = server.arg("utc").toInt();
     if (utc >= -43200 && utc <= 50400) Settings::utcOffset = utc;
 
-    // Manual theme
+    // Theme mode: auto / dark / light
     v = server.arg("theme");
-    if (v == "dark") Settings::themeDark = true;
-    else if (v == "light") Settings::themeDark = false;
+    if (v == "auto")       { Settings::themeMode = 0; }
+    else if (v == "dark")  { Settings::themeMode = 1; Settings::themeDark = true; }
+    else if (v == "light") { Settings::themeMode = 2; Settings::themeDark = false; }
 
     Settings::autoDetectLastOk = false;
     Settings::autoDetectLastEpoch = time(nullptr);
@@ -1131,19 +1155,54 @@ static String localAddress() {
     return "desknexus.local";
 }
 
+// WiFi reconnect state — exponential backoff for STA recovery
+static int          reconnectFailures    = 0;
+static unsigned long lastReconnectAttempt = 0;
+
+// Backoff intervals (ms): 30s, 60s, 120s, 300s (cap)
+static unsigned long reconnectBackoffMs() {
+    const unsigned long intervals[] = { 30000, 60000, 120000, 300000 };
+    int idx = reconnectFailures;
+    if (idx < 0) idx = 0;
+    if (idx >= 4) idx = 3;
+    return intervals[idx];
+}
+
 /*
  * reconnect() — Attempt to reconnect if WiFi was lost.
  * Call periodically from loop().
+ * Uses exponential backoff. Does NOT fall back to AP mode automatically —
+ * keeps retrying STA in the background so the device recovers when the
+ * router comes back.
  */
 static void reconnect() {
     if (apActive) return;   // managed by portal
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[Network] WiFi lost — reconnecting...");
-        WiFi.disconnect(true);
-        if (!connectSTA()) {
-            Serial.println("[Network] Reconnect failed — switching to AP mode.");
-            startAP();
+    if (WiFi.status() == WL_CONNECTED) {
+        // Connection recovered (possibly by WiFi auto-reconnect)
+        if (reconnectFailures > 0) {
+            Serial.println("[Network] WiFi recovered.");
+            reconnectFailures = 0;
         }
+        return;
+    }
+
+    unsigned long now = millis();
+    unsigned long backoff = reconnectBackoffMs();
+    if (lastReconnectAttempt > 0 && (now - lastReconnectAttempt) < backoff) {
+        return;  // wait for backoff period
+    }
+    lastReconnectAttempt = now;
+
+    Serial.printf("[Network] WiFi lost — reconnect attempt #%d (backoff %lus)...\n",
+                  reconnectFailures + 1, backoff / 1000);
+    WiFi.disconnect(true);
+    if (connectSTA()) {
+        Serial.println("[Network] Reconnected to WiFi.");
+        reconnectFailures = 0;
+    } else {
+        reconnectFailures++;
+        Serial.printf("[Network] Reconnect failed — next retry in %lus.\n",
+                      reconnectBackoffMs() / 1000);
     }
 }
 

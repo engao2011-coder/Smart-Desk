@@ -195,10 +195,17 @@ static bool isPrayed(int index) {
 }
 
 static bool isSnoozed(int index) {
-    return index >= 0 &&
-           index == current.snoozedPrayerIndex &&
-           current.snoozeUntilEpoch > 0 &&
-           (long)time(nullptr) < current.snoozeUntilEpoch;  // validate epoch so stale NVS never shows as active
+    if (index < 0 || index != current.snoozedPrayerIndex || current.snoozeUntilEpoch <= 0)
+        return false;
+    long now = (long)time(nullptr);
+    // Range guard: if snooze epoch is more than 24h in the future, treat as corrupt
+    if (current.snoozeUntilEpoch > now + 86400L) {
+        current.snoozeUntilEpoch = 0;
+        current.snoozedPrayerIndex = -1;
+        current.snoozeCount = 0;
+        return false;
+    }
+    return now < current.snoozeUntilEpoch;
 }
 
 static int activePendingIndexForTime(const struct tm& t) {
@@ -459,6 +466,33 @@ static void updateNextPrayer() {
     }
     // If all prayers have passed today, next = Fajr (tomorrow)
     if (current.nextIndex == -1) current.nextIndex = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Index of the current/most-recent prayer (pending, due, or last past prayer).
+// Used by the Home page to show "current prayer" status.
+// ---------------------------------------------------------------------------
+static int currentOrLastPrayerIndex() {
+    if (!current.valid) return -1;
+    struct tm t;
+    if (!getLocalTime(&t)) return -1;
+    syncDailyState(t);
+
+    // If a prayer is pending (due but not prayed), show that one
+    int pending = activePendingIndexForTime(t);
+    if (pending >= 0) return pending;
+
+    // Otherwise find the most recent prayer that has passed (prayed or not)
+    int nowMin = t.tm_hour * 60 + t.tm_min;
+    int lastPast = -1;
+    for (int i = 0; i < PRAYER_COUNT; i++) {
+        if (toMinutes(current.prayers[i].time) <= nowMin) {
+            lastPast = i;
+        }
+    }
+    // Pre-Fajr: no prayer has passed today yet — show Isha (last of previous day)
+    if (lastPast < 0) lastPast = PRAYER_COUNT - 1;
+    return lastPast;
 }
 
 // ---------------------------------------------------------------------------

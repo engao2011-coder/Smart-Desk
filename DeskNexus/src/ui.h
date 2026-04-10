@@ -7,18 +7,19 @@
  * Screen layout (portrait, 240 wide × 320 tall):
  *
  *  ┌────────────────────────┐ y=0
- *  │  Status bar  (24 px)   │  WiFi dot · date · ● ○ page dots
+ *  │  Status bar  (24 px)   │  WiFi dot · date · ■ ● ○ ○ page dots
  *  ├────────────────────────┤ y=24
  *  │  Hero       (100 px)   │  HH:MM (left) │ icon+temp (right)
  *  │                        │  countdown / status below clock
  *  ├────────────────────────┤ y=124
  *  │                        │
- *  │  Panel      (196 px)   │  Prayer (page 0) or Stocks (page 1)
- *  │                        │  auto-cycles every CAROUSEL_INTERVAL_MS
+ *  │  Panel      (196 px)   │  Home (0), Prayer (1), Forecast (2), Stocks (3)
+ *  │                        │  Home is idle landing page; detail pages auto-carousel
  *  └────────────────────────┘ y=320
  *
  * Touch: tap right half of panel → next page, left half → prev page.
- * Theme is manually selected (dark/light) and persisted in settings.
+ * Home page: tap prayer section → prayer detail, tap stock → stocks detail.
+ * After 60s idle, returns to Home page automatically.
  *
  * Fonts used: TFT_eSPI built-in Free fonts (FreeSansBold24pt7b etc.)
  */
@@ -93,10 +94,11 @@ static const Theme THEME_LIGHT = {
 #define SCREEN_H  320
 
 // Page indices (no Settings page on display)
-#define PAGE_PRAYER    0
-#define PAGE_FORECAST  1
-#define PAGE_STOCKS    2
-#define PAGE_COUNT     3
+#define PAGE_HOME      0
+#define PAGE_PRAYER    1
+#define PAGE_FORECAST  2
+#define PAGE_STOCKS    3
+#define PAGE_COUNT     4
 
 namespace UI {
 
@@ -118,7 +120,7 @@ enum BannerStyle { BANNER_ACCENT, BANNER_GOLD, BANNER_RED };
 static TFT_eSPI tft = TFT_eSPI();
 static Theme    theme       = THEME_DARK;
 static bool     isDarkTheme = true;
-static int      activePage  = PAGE_PRAYER;
+static int      activePage  = PAGE_HOME;
 static bool     needsRedraw = true;
 static bool     dimmed      = false;
 static bool     azanScreenActive = false;
@@ -137,6 +139,10 @@ static unsigned long carouselPausedUntil = 0;
 // Page dot pulse animation
 static unsigned long dotPulseStart      = 0;
 
+// Home page "Prayed" button state (set by drawHomePanel, read by handleTouch)
+static bool homePrayedButtonVisible = false;
+static int  homePrayedButtonY = 0;
+
 // ── Touch calibration ─────────────────────────────────────────────────────
 static uint16_t calData[5] = TOUCH_CAL_DATA;
 
@@ -154,7 +160,31 @@ static void fillPanel(int y, int h, uint16_t color) {
 static void playPanelTransition(int direction);
 
 static void updateTheme() {
-    bool wantDark = Settings::themeDark;
+    bool wantDark;
+
+    switch (Settings::themeMode) {
+        case 1:  wantDark = true;  break;  // always dark
+        case 2:  wantDark = false; break;  // always light
+        default: {
+            // Auto: dark between Maghrib and Sunrise, light otherwise
+            if (Prayer::current.valid) {
+                struct tm t;
+                if (getLocalTime(&t)) {
+                    int nowMin = t.tm_hour * 60 + t.tm_min;
+                    int sunrise  = Prayer::toMinutes(Prayer::current.prayers[1].time);
+                    int maghrib  = Prayer::toMinutes(Prayer::current.prayers[4].time);
+                    wantDark = (nowMin >= maghrib || nowMin < sunrise);
+                } else {
+                    wantDark = Settings::themeDark;
+                }
+            } else {
+                wantDark = Settings::themeDark;
+            }
+            Settings::themeDark = wantDark;  // keep in sync for NVS
+            break;
+        }
+    }
+
     if (wantDark == isDarkTheme) return;  // no change
 
     // Smooth transition: fade backlight down, swap palette, redraw, fade up
@@ -248,12 +278,13 @@ static int nextAllowedPage(int fromPage, int direction) {
     return PAGE_PRAYER;
 }
 
-// Like nextAllowedPage but also skips PAGE_STOCKS and PAGE_FORECAST — they only appear via event trigger
+// Carousel-safe page advance — skips PAGE_HOME (home is the idle landing page,
+// not part of the auto-rotation). Cycles through the 3 detail pages only.
 static int nextCarouselPage(int fromPage, int direction) {
     int page = fromPage;
     for (int i = 0; i < PAGE_COUNT; i++) {
         page = (page + direction + PAGE_COUNT) % PAGE_COUNT;
-        if (isPageAllowed(page) && page != PAGE_STOCKS && page != PAGE_FORECAST) {
+        if (page != PAGE_HOME && isPageAllowed(page)) {
             return page;
         }
     }
@@ -275,7 +306,7 @@ static bool switchPageBy(int direction) {
 
 static bool coerceAllowedActivePage() {
     if (isPageAllowed(activePage)) return false;
-    activePage = PAGE_PRAYER;
+    activePage = PAGE_HOME;
     needsRedraw = true;
     return true;
 }
@@ -294,12 +325,32 @@ static void advancePage() {
 }
 
 static bool shouldAutoAdvance() {
+    if (activePage == PAGE_HOME) return false;  // Home is the idle page, don't auto-advance
     if (millis() < carouselPausedUntil) return false;
     return (millis() - lastPageSwitch) >= CAROUSEL_INTERVAL_MS;
 }
 
+// Return to Home page after idle timeout on any detail page
+static bool shouldReturnToHome() {
+    if (activePage == PAGE_HOME) return false;
+    return (millis() - lastTouchMs) >= CAROUSEL_IDLE_RETURN_MS;
+}
+
+static void returnToHome() {
+    if (activePage == PAGE_HOME) return;
+    playPanelTransition(-1);
+    dotPulseStart = millis();
+    activePage = PAGE_HOME;
+    lastPageSwitch = millis();
+    needsRedraw = true;
+}
+
 static void pauseCarousel() {
     carouselPausedUntil = millis() + CAROUSEL_PAUSE_MS;
+}
+
+static void pauseCarouselFor(unsigned long ms) {
+    carouselPausedUntil = millis() + ms;
 }
 
 static bool hasPrayerFooterActions() {
@@ -359,6 +410,7 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
                 delay(120);
                 if (Prayer::markPrayed(azanPrayerIndex)) {
                     dismissAzanScreen();
+                    activePage = PAGE_HOME;  // return to Home after marking prayed
                 }
             } else {
                 // Flash Snooze button (120ms visual feedback)
@@ -401,6 +453,46 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             }
             needsRedraw = true;
             return true;
+        }
+    }
+
+    // Home page touch zones — drill into detail pages or quick-prayed
+    if (activePage == PAGE_HOME && (int)ty >= LAYOUT_PANEL_Y) {
+        const int cardY = LAYOUT_PANEL_Y + 8;
+        // "Prayed" quick-action button on Home
+        if (homePrayedButtonVisible) {
+            int btnW = 80, btnH = 22;
+            int btnX = 8 + (SCREEN_W - 16 - btnW) / 2;
+            if ((int)ty >= homePrayedButtonY && (int)ty < homePrayedButtonY + btnH &&
+                (int)tx >= btnX && (int)tx < btnX + btnW) {
+                tft.fillRoundRect(btnX, homePrayedButtonY, btnW, btnH, 6, theme.textDim);
+                delay(120);
+                Prayer::markPendingPrayed();
+                needsRedraw = true;
+                return true;
+            }
+        }
+        // Separator is at roughly cardY + 6 + 12 + 30 + (prayed btn ~26) + 8 = ~82px from cardY
+        // Prayer section occupies top ~55% of panel, stock section bottom ~35%
+        int panelMid = LAYOUT_PANEL_Y + (LAYOUT_PANEL_H * 2 / 3);
+        if ((int)ty < panelMid) {
+            // Tap prayer area → drill to full prayer list
+            playPanelTransition(1);
+            dotPulseStart = millis();
+            activePage = PAGE_PRAYER;
+            lastPageSwitch = millis();
+            needsRedraw = true;
+            return true;
+        } else {
+            // Tap stock area → drill to full stocks page (if allowed)
+            if (isPageAllowed(PAGE_STOCKS)) {
+                playPanelTransition(1);
+                dotPulseStart = millis();
+                activePage = PAGE_STOCKS;
+                lastPageSwitch = millis();
+                needsRedraw = true;
+                return true;
+            }
         }
     }
 
@@ -469,10 +561,21 @@ static void drawStatusBar(bool wifiOk, const String& dateStr, const String& ipSt
         if (i == activePage) {
             int r = pulsing ? DOT_R + 2 : DOT_R;
             tft.fillCircle(cx, cy, r + 2, theme.panel);   // clear area
-            tft.fillCircle(cx, cy, r, theme.accent);
-            tft.drawCircle(cx, cy, r + 1, theme.gold);    // accent glow ring
+            if (i == PAGE_HOME) {
+                // Home dot: small rounded square to differentiate
+                tft.fillRoundRect(cx - r, cy - r, r * 2, r * 2, 2, theme.accent);
+                tft.drawRoundRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2, 2, theme.gold);
+            } else {
+                tft.fillCircle(cx, cy, r, theme.accent);
+                tft.drawCircle(cx, cy, r + 1, theme.gold);    // accent glow ring
+            }
         } else if (allowed) {
-            tft.drawCircle(cx, cy, DOT_R, theme.textDim); // hollow ring
+            if (i == PAGE_HOME) {
+                tft.fillRoundRect(cx - DOT_R + 1, cy - DOT_R + 1, (DOT_R - 1) * 2, (DOT_R - 1) * 2, 2, theme.panel);
+                tft.drawRoundRect(cx - DOT_R + 1, cy - DOT_R + 1, (DOT_R - 1) * 2, (DOT_R - 1) * 2, 2, theme.textDim);
+            } else {
+                tft.drawCircle(cx, cy, DOT_R, theme.textDim); // hollow ring
+            }
         } else {
             tft.fillCircle(cx, cy, DOT_R, theme.panel);
             tft.drawCircle(cx, cy, DOT_R - 1, theme.separator);
@@ -632,16 +735,31 @@ static void drawHero(const struct tm& t) {
     const int rZoneX = 146;
 
     if (!Weather::current.valid) {
-        const char* line2 = "loading...";
-        if (Weather::current.fetchState == Weather::WEATHER_NO_KEY)    line2 = "No API key";
-        if (Weather::current.fetchState == Weather::WEATHER_NET_ERROR) line2 = "Net error";
         tft.setFreeFont(nullptr);
         tft.setTextSize(1);
         tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(rZoneX, cardY + 28);
-        tft.print("Weather");
-        tft.setCursor(rZoneX, cardY + 40);
-        tft.print(line2);
+        if (Weather::current.fetchState == Weather::WEATHER_NO_KEY) {
+            // Friendly hint instead of error — weather is optional
+            tft.setCursor(rZoneX, cardY + 22);
+            tft.print("Weather");
+            tft.setCursor(rZoneX, cardY + 34);
+            tft.print("Setup at");
+            tft.setTextColor(theme.accent, theme.panel);
+            tft.setCursor(rZoneX, cardY + 46);
+            tft.print("desknexus");
+            tft.setCursor(rZoneX, cardY + 58);
+            tft.print(".local");
+            tft.setTextColor(theme.textDim, theme.panel);
+            tft.setCursor(rZoneX, cardY + 72);
+            tft.print("/settings");
+        } else {
+            const char* line2 = "loading...";
+            if (Weather::current.fetchState == Weather::WEATHER_NET_ERROR) line2 = "Net error";
+            tft.setCursor(rZoneX, cardY + 28);
+            tft.print("Weather");
+            tft.setCursor(rZoneX, cardY + 40);
+            tft.print(line2);
+        }
     } else {
         const Weather::Data& w = Weather::current;
         uint16_t wAccent = Weather::iconColor(w.iconCode);
@@ -804,14 +922,7 @@ static void drawPrayerPanel() {
                 fg = theme.textPri;
                 edgeColor = theme.textSec;
                 showHourglass = true;
-                char untilBuf[6] = {};
-                static char snoozePillBuf[14];
-                if (Prayer::snoozedUntilText(untilBuf, sizeof(untilBuf))) {
-                    snprintf(snoozePillBuf, sizeof(snoozePillBuf), "SNZD%s", untilBuf);
-                } else {
-                    strncpy(snoozePillBuf, "SNZD", sizeof(snoozePillBuf));
-                }
-                pillText = snoozePillBuf;
+                pillText = "SNZD";
                 pillBg = theme.textDim;
                 pillFg = theme.textPri;
                 break;
@@ -876,6 +987,19 @@ static void drawPrayerPanel() {
             drawPillBadge(100, ry + (ROW_H - 14) / 2, pillText, pillBg, pillFg);
         }
 
+        // Snooze until-time shown as a small secondary label after the pill
+        if (rowState == Prayer::ROW_SNOOZED) {
+            char untilBuf[6] = {};
+            if (Prayer::snoozedUntilText(untilBuf, sizeof(untilBuf))) {
+                tft.setFreeFont(nullptr);
+                tft.setTextSize(1);
+                tft.setTextColor(theme.textDim, rowBg);
+                int pillW = tft.textWidth("SNZD") + 8;
+                tft.setCursor(100 + pillW + 2, ry + (ROW_H - 14) / 2 + 2);
+                tft.print(untilBuf);
+            }
+        }
+
         // Prayer time (right-aligned) — FreeSansBold9pt for crispness
         const char* timeStr = Prayer::current.prayers[i].time;
         tft.setFreeFont(&FreeSansBold9pt7b);
@@ -933,6 +1057,253 @@ static void drawPrayerPanel() {
         tft.setCursor(bx2 + (bW - slw) / 2, fy + (bH - 16) / 2);
         tft.print(sLabelBuf);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Home / Dashboard panel (y=124..319) — summary: current prayer + next prayer
+// + top-moving stock. Tap sections to drill into detail pages.
+// ---------------------------------------------------------------------------
+static void drawHomePanel() {
+    fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
+    tft.setFreeFont(nullptr);
+
+    homePrayedButtonVisible = false;
+
+    const int cardX = 8, cardW = SCREEN_W - 16;
+    const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
+    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
+
+    int yPos = cardY + 6;
+
+    // ── Section 1: Current Prayer ──────────────────────────────────────────
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(cardX + 10, yPos);
+    tft.print("Current Prayer");
+    yPos += 12;
+
+    int curIdx = Prayer::currentOrLastPrayerIndex();
+
+    if (!Prayer::current.valid || curIdx < 0) {
+        tft.setTextSize(2);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(cardX + 10, yPos + 4);
+        tft.print("Loading...");
+        yPos += 30;
+    } else {
+        Prayer::RowState curState = Prayer::rowStateForIndex(curIdx);
+        const char* pName = Prayer::current.prayers[curIdx].name;
+        const char* pTime = Prayer::current.prayers[curIdx].time;
+
+        // Left edge bar (color signals state)
+        uint16_t edgeColor = theme.separator;
+        switch (curState) {
+            case Prayer::ROW_DONE:    edgeColor = theme.green;  break;
+            case Prayer::ROW_PENDING: edgeColor = theme.accent; break;
+            case Prayer::ROW_SNOOZED: edgeColor = theme.textSec; break;
+            case Prayer::ROW_MISSED:  edgeColor = theme.red;    break;
+            default:                  edgeColor = theme.gold;    break;
+        }
+        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
+
+        // Prayer name (large)
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textPri, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 16);
+        tft.print(pName);
+
+        // Status indicator after name
+        int nameW = tft.textWidth(pName);
+        tft.setFreeFont(nullptr);
+        if (curState == Prayer::ROW_DONE) {
+            drawCheckmark(cardX + 16 + nameW + 4, yPos + 6, theme.green);
+            tft.setTextSize(1);
+            tft.setTextColor(theme.green, theme.panel);
+            tft.setCursor(cardX + 16 + nameW + 18, yPos + 8);
+            tft.print("Prayed");
+        } else if (curState == Prayer::ROW_PENDING) {
+            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "DUE", theme.red, theme.textPri);
+        } else if (curState == Prayer::ROW_SNOOZED) {
+            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "SNZD", theme.textDim, theme.textPri);
+        } else if (curState == Prayer::ROW_MISSED) {
+            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "MISS", theme.red, theme.textPri);
+        }
+
+        // Time (right-aligned)
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextColor(theme.textSec, theme.panel);
+        int tw = tft.textWidth(pTime);
+        tft.setCursor(cardX + cardW - tw - 14, yPos + 16);
+        tft.print(pTime);
+
+        tft.setFreeFont(nullptr);
+        yPos += 30;
+
+        // "Prayed" quick-action button when prayer is pending
+        if (curState == Prayer::ROW_PENDING) {
+            int btnW = 80, btnH = 22;
+            int btnX = cardX + (cardW - btnW) / 2;
+            tft.fillRoundRect(btnX, yPos, btnW, btnH, 6, theme.green);
+            tft.setTextSize(1);
+            tft.setTextColor(theme.textPri, theme.green);
+            const char* pLabel = "Prayed";
+            int plw = tft.textWidth(pLabel);
+            tft.setCursor(btnX + (btnW - plw) / 2, yPos + 7);
+            tft.print(pLabel);
+            homePrayedButtonVisible = true;
+            homePrayedButtonY = yPos;
+            yPos += 26;
+        }
+    }
+
+    // ── Separator ──────────────────────────────────────────────────────────
+    tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
+    yPos += 8;
+
+    // ── Section 2: Next Prayer + Countdown Bar ─────────────────────────────
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(cardX + 10, yPos);
+    tft.print("Next Prayer");
+    yPos += 12;
+
+    int nextIdx = Prayer::current.valid ? Prayer::current.nextIndex : -1;
+
+    if (!Prayer::current.valid || nextIdx < 0) {
+        tft.setTextSize(2);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(cardX + 10, yPos + 4);
+        tft.print("---");
+        yPos += 30;
+    } else {
+        const char* nName = Prayer::current.prayers[nextIdx].name;
+        const char* nTime = Prayer::current.prayers[nextIdx].time;
+
+        // Edge bar
+        tft.fillRect(cardX + 6, yPos, 4, 28, theme.gold);
+
+        // Prayer name (large)
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextColor(theme.textPri, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 16);
+        tft.print(nName);
+
+        // Time (right-aligned)
+        tft.setTextColor(theme.gold, theme.panel);
+        int tw = tft.textWidth(nTime);
+        tft.setCursor(cardX + cardW - tw - 14, yPos + 16);
+        tft.print(nTime);
+
+        tft.setFreeFont(nullptr);
+        yPos += 30;
+
+        // Countdown progress bar
+        int minutesLeft = Prayer::minutesUntilNext();
+        if (minutesLeft >= 0) {
+            const int barX = cardX + 12, barW = cardW - 24, barH = 10;
+            // Track
+            tft.fillRoundRect(barX, yPos, barW, barH, 4, theme.separator);
+            // Fill: invert so bar shrinks as time approaches (full = far away, empty = imminent)
+            // Use 120 min as "full" reference to keep it visually useful
+            float pct = 1.0f - ((float)minutesLeft / 120.0f);
+            if (pct < 0.0f) pct = 0.0f;
+            if (pct > 1.0f) pct = 1.0f;
+            int fillW = (int)(barW * pct);
+            // Color: gold when < 5 min, green otherwise
+            uint16_t barColor = (minutesLeft < 5) ? theme.gold : theme.green;
+            if (fillW > 0) {
+                tft.fillRoundRect(barX, yPos, fillW, barH, 4, barColor);
+            }
+
+            // Time remaining text overlay
+            char remBuf[12];
+            int h = minutesLeft / 60;
+            int m = minutesLeft % 60;
+            snprintf(remBuf, sizeof(remBuf), "%dh %02dm", h, m);
+            tft.setTextSize(1);
+            uint16_t remColor = (minutesLeft < 5) ? theme.gold : theme.textSec;
+            tft.setTextColor(remColor, theme.panel);
+            int rw = tft.textWidth(remBuf);
+            tft.setCursor(barX + barW - rw, yPos + barH + 2);
+            tft.print(remBuf);
+            yPos += barH + 14;
+        } else {
+            yPos += 4;
+        }
+    }
+
+    // ── Separator ──────────────────────────────────────────────────────────
+    tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
+    yPos += 8;
+
+    // ── Section 3: Top Moving Stock ────────────────────────────────────────
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(cardX + 10, yPos);
+    tft.print("Top Stock");
+    yPos += 12;
+
+    int topIdx = Stocks::topMoverIndex();
+
+    if (topIdx < 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 4);
+        tft.print("No data");
+    } else {
+        const Stocks::Quote& q = Stocks::quotes[topIdx];
+        uint16_t pctColor = (q.changePct >= 0) ? theme.green : theme.red;
+        uint16_t edgeColor = pctColor;
+
+        // Edge bar
+        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
+
+        // Symbol
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextColor(theme.textPri, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 16);
+        tft.print(q.symbol);
+
+        // % change (right, with arrow)
+        char pctBuf[16];
+        const char* arrow = (q.changePct >= 0) ? " +" : " ";
+        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, q.changePct);
+        tft.setTextColor(pctColor, theme.panel);
+        int pw = tft.textWidth(pctBuf);
+        tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
+        tft.print(pctBuf);
+
+        tft.setFreeFont(nullptr);
+        yPos += 20;
+
+        // Price below symbol
+        char priceBuf[16];
+        snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textSec, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 2);
+        tft.print(priceBuf);
+
+        // Alert dot
+        if (q.alertTriggered) {
+            tft.fillCircle(cardX + cardW - 16, yPos + 4, 3, theme.gold);
+        }
+    }
+
+    // Touch affordance chevrons
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(2);
+    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print("<");
+    int rw = tft.textWidth(">");
+    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print(">");
+
+    // Reset text state
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
 }
 
 static void drawAzanScreen() {
@@ -1466,6 +1837,7 @@ static void redraw(bool wifiOk, const String& ipAddr,
     drawHero(t);
 
     switch (activePage) {
+        case PAGE_HOME:     drawHomePanel();     break;
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
@@ -1503,6 +1875,7 @@ static void updatePanel() {
     }
     coerceAllowedActivePage();
     switch (activePage) {
+        case PAGE_HOME:     drawHomePanel();     break;
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
@@ -1515,6 +1888,7 @@ static void updatePanel() {
 static void showSplash() {
     tft.fillScreen(theme.bg);
     tft.fillRoundRect(20, 96, SCREEN_W - 40, 116, 18, theme.panel);
+    tft.setTextSize(1);
     tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextColor(theme.accent, theme.panel);
     String title = "DeskNexus";
