@@ -103,6 +103,7 @@
 // - fetched at most once per wall-clock day
 // - successful fetch window is persisted in NVS
 
+#define PRAYER_SLOT_COUNT         6    // total prayer slots (Fajr..Isha incl. Sunrise)
 #define PRAYER_PRE_ALERT_MINUTES  15
 #define PRAYER_SNOOZE_MINUTES     15
 #define PRAYER_MAX_SNOOZE_COUNT   3    // max snooze attempts per prayer per day

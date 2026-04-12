@@ -854,6 +854,22 @@ static void drawPrayerPanel() {
 
     tft.fillRoundRect(8, LAYOUT_PANEL_Y + 8, SCREEN_W - 16, LAYOUT_PANEL_H - 16, 12, theme.panel);
 
+    // Missed prayers count badge (top-right of card)
+    int mc = Prayer::missedCount();
+    if (mc > 1) {
+        char mcBuf[8];
+        snprintf(mcBuf, sizeof(mcBuf), "%d missed", mc);
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+        int mcW = tft.textWidth(mcBuf) + 8;
+        int mcX = SCREEN_W - 16 - mcW;
+        int mcY = LAYOUT_PANEL_Y + 10;
+        tft.fillRoundRect(mcX, mcY, mcW, 12, 4, theme.red);
+        tft.setTextColor(theme.textPri, theme.red);
+        tft.setCursor(mcX + 4, mcY + 2);
+        tft.print(mcBuf);
+    }
+
     const int pendingForFooter = Prayer::pendingPrayerIndex();
     const int footerH = pendingForFooter >= 0 ? 52 : 0;
     const int CARD_TOP = LAYOUT_PANEL_Y + 14;
@@ -987,10 +1003,20 @@ static void drawPrayerPanel() {
             drawPillBadge(100, ry + (ROW_H - 14) / 2, pillText, pillBg, pillFg);
         }
 
+        // Tap hint for MISSED rows — lets user know the row is tappable
+        if (rowState == Prayer::ROW_MISSED) {
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            int pillW = tft.textWidth("MISS") + 8;
+            tft.setTextColor(theme.textDim, rowBg);
+            tft.setCursor(100 + pillW + 2, ry + (ROW_H - 14) / 2 + 2);
+            tft.print("tap");
+        }
+
         // Snooze until-time shown as a small secondary label after the pill
         if (rowState == Prayer::ROW_SNOOZED) {
             char untilBuf[6] = {};
-            if (Prayer::snoozedUntilText(untilBuf, sizeof(untilBuf))) {
+            if (Prayer::snoozedUntilText(i, untilBuf, sizeof(untilBuf))) {
                 tft.setFreeFont(nullptr);
                 tft.setTextSize(1);
                 tft.setTextColor(theme.textDim, rowBg);
@@ -1045,7 +1071,7 @@ static void drawPrayerPanel() {
         // "Snooze" button (gold, dimmed if already snoozed or cap reached)
         int bx2 = SCREEN_W / 2 + 4;
         bool footerSnoozed = Prayer::isSnoozed(pendingForFooter);
-        bool footerCapHit  = (Prayer::current.snoozeCount >= PRAYER_MAX_SNOOZE_COUNT);
+        bool footerCapHit  = (Prayer::current.snoozeCount[pendingForFooter] >= PRAYER_MAX_SNOOZE_COUNT);
         uint16_t sBg = (footerSnoozed || footerCapHit) ? theme.textDim : theme.gold;
         tft.fillRoundRect(bx2, fy, bW, bH, 8, sBg);
         tft.setTextColor(theme.bg, sBg);
@@ -1427,7 +1453,7 @@ static void drawAzanScreen() {
 
     int bx2 = SCREEN_W / 2 + 6;
     bool azanSnoozed = Prayer::isSnoozed(prayerIndex);
-    bool azanCapHit  = (Prayer::current.snoozeCount >= PRAYER_MAX_SNOOZE_COUNT);
+    bool azanCapHit  = (Prayer::current.snoozeCount[prayerIndex] >= PRAYER_MAX_SNOOZE_COUNT);
     uint16_t azanSnBg = (azanSnoozed || azanCapHit) ? theme.textDim : theme.gold;
     tft.fillRoundRect(bx2, buttonTop, bW, buttonH, 10, azanSnBg);
     tft.setTextColor(theme.bg, azanSnBg);

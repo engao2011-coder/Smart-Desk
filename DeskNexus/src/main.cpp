@@ -195,6 +195,12 @@ static void processPrayerReminderEvent() {
             UI::activePage = PAGE_PRAYER;
             UI::needsRedraw = true;
             break;
+        case Prayer::REMINDER_MISSED_CATCHUP:
+            snprintf(msg, sizeof(msg), "%s missed - tap to mark", name);
+            UI::showBanner(msg, BANNER_SNOOZE_EXP_MS, UI::BANNER_RED);
+            UI::activePage = PAGE_PRAYER;
+            UI::needsRedraw = true;
+            break;
         case Prayer::REMINDER_NONE:
         default:
             break;

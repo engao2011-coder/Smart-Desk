@@ -45,10 +45,9 @@ struct Data {
     unsigned long fetchedAt = 0;
     int  stateDayKey   = -1;
     int  prayedMask    = 0;
-    int  snoozedPrayerIndex = -1;
-    long snoozeUntilEpoch = 0;
-    int  snoozeCount = 0;            // how many times current prayer was snoozed today
-    bool snoozeJustExpired = false;  // set by syncDailyState; consumed by pollReminderEvent
+    long snoozeUntilEpoch[PRAYER_COUNT] = {};  // per-prayer snooze expiry
+    int  snoozeCount[PRAYER_COUNT] = {};       // per-prayer snooze count today
+    bool snoozeJustExpired[PRAYER_COUNT] = {}; // set by syncDailyState; consumed by pollReminderEvent
     int  lastPreAlertPrayerIndex = -1;
     int  lastDueAlertPrayerIndex = -1;
     int  lastReminderPrayerIndex = -1;
@@ -66,6 +65,7 @@ enum ReminderEventType {
     REMINDER_DUE,
     REMINDER_REPEAT,
     REMINDER_SNOOZE_EXPIRED,  // snooze window elapsed; shows banner, not full Azan screen
+    REMINDER_MISSED_CATCHUP,  // prayer transitioned to missed; shows tap-to-mark banner
 };
 
 enum RowState {
@@ -116,7 +116,6 @@ static void persistState() {
     Settings::savePrayerState(
         current.stateDayKey,
         current.prayedMask,
-        current.snoozedPrayerIndex,
         current.snoozeUntilEpoch,
         current.snoozeCount
     );
@@ -125,10 +124,9 @@ static void persistState() {
 static void resetDailyState(const struct tm& t, bool persist = true) {
     current.stateDayKey = dayKey(t);
     current.prayedMask = 0;
-    current.snoozedPrayerIndex = -1;
-    current.snoozeUntilEpoch = 0;
-    current.snoozeCount = 0;
-    current.snoozeJustExpired = false;
+    memset(current.snoozeUntilEpoch, 0, sizeof(current.snoozeUntilEpoch));
+    memset(current.snoozeCount, 0, sizeof(current.snoozeCount));
+    memset(current.snoozeJustExpired, 0, sizeof(current.snoozeJustExpired));
     current.lastPreAlertPrayerIndex = -1;
     current.lastDueAlertPrayerIndex = -1;
     current.lastReminderPrayerIndex = -1;
@@ -145,43 +143,22 @@ static void syncDailyState(const struct tm& t) {
     if (current.stateDayKey != todayKey) {
         resetDailyState(t, true);
     }
-    if (current.snoozedPrayerIndex >= 0 && current.snoozeUntilEpoch > 0) {
-        long nowEpoch = epochForLocalTime(t);
-        if (nowEpoch >= current.snoozeUntilEpoch) {
-            // Flag for a soft SNOOZE_EXPIRED event so the next pollReminderEvent()
-            // emits a banner only; the Azan screen re-fires on the subsequent pass.
-            // NOTE: snoozedPrayerIndex is intentionally kept so the orphaned-snooze
-            // block below can detect when a *different* prayer becomes pending and
-            // reset snoozeCount — preventing "No More" from bleeding into un-snoozed
-            // later prayers. isSnoozed() validates via snoozeUntilEpoch > 0, so it
-            // correctly returns false after expiry regardless.
-            current.snoozeUntilEpoch = 0;
-            current.snoozeJustExpired = true;
-            persistState();
-            Serial.println("[Prayer] Snooze expired.");
-        }
-    }
-    // Clear orphaned snooze: if a later prayer is now the active pending one,
-    // the previously-snoozed prayer's snooze record is no longer meaningful.
-    if (current.snoozedPrayerIndex >= 0) {
-        int pendingNow = activePendingIndexForTime(t);
-        if (pendingNow >= 0 && pendingNow != current.snoozedPrayerIndex) {
-            Serial.printf("[Prayer] Orphaned snooze cleared (was idx %d, now pending idx %d).\n",
-                          current.snoozedPrayerIndex, pendingNow);
-            current.snoozedPrayerIndex = -1;
-            current.snoozeUntilEpoch = 0;
-            current.snoozeCount = 0;
-            persistState();
+    // Per-prayer snooze expiry check
+    long nowEpoch = epochForLocalTime(t);
+    for (int i = 0; i < PRAYER_COUNT; i++) {
+        if (current.snoozeUntilEpoch[i] > 0 && nowEpoch >= current.snoozeUntilEpoch[i]) {
+            current.snoozeUntilEpoch[i] = 0;
+            current.snoozeJustExpired[i] = true;
+            Serial.printf("[Prayer] Snooze expired for %s\n", current.prayers[i].name);
         }
     }
 }
 
 static void loadPersistentState() {
-    current.stateDayKey        = Settings::prayerStateDayKey;
-    current.prayedMask         = Settings::prayerPrayedMask;
-    current.snoozedPrayerIndex = Settings::prayerSnoozeIndex;
-    current.snoozeUntilEpoch   = Settings::prayerSnoozeUntil;
-    current.snoozeCount        = Settings::prayerSnoozeCount;
+    current.stateDayKey = Settings::prayerStateDayKey;
+    current.prayedMask  = Settings::prayerPrayedMask;
+    memcpy(current.snoozeUntilEpoch, Settings::prayerSnoozeUntil, sizeof(current.snoozeUntilEpoch));
+    memcpy(current.snoozeCount,      Settings::prayerSnoozeCount, sizeof(current.snoozeCount));
 
     struct tm t;
     if (getLocalTime(&t)) {
@@ -195,30 +172,29 @@ static bool isPrayed(int index) {
 }
 
 static bool isSnoozed(int index) {
-    if (index < 0 || index != current.snoozedPrayerIndex || current.snoozeUntilEpoch <= 0)
+    if (!isActionablePrayer(index) || current.snoozeUntilEpoch[index] <= 0)
         return false;
     long now = (long)time(nullptr);
     // Range guard: if snooze epoch is more than 24h in the future, treat as corrupt
-    if (current.snoozeUntilEpoch > now + 86400L) {
-        current.snoozeUntilEpoch = 0;
-        current.snoozedPrayerIndex = -1;
-        current.snoozeCount = 0;
+    if (current.snoozeUntilEpoch[index] > now + 86400L) {
+        current.snoozeUntilEpoch[index] = 0;
+        current.snoozeCount[index] = 0;
         return false;
     }
-    return now < current.snoozeUntilEpoch;
+    return now < current.snoozeUntilEpoch[index];
 }
 
 static int activePendingIndexForTime(const struct tm& t) {
     if (!current.valid) return -1;  // guard: pray data not yet loaded
     int nowMin = t.tm_hour * 60 + t.tm_min;
-    int latestDue = -1;
+    // Return the EARLIEST unprayed past prayer (Qada order)
     for (int i = 0; i < PRAYER_COUNT; i++) {
         if (!isActionablePrayer(i) || isPrayed(i)) continue;
         if (toMinutes(current.prayers[i].time) <= nowMin) {
-            latestDue = i;
+            return i;
         }
     }
-    return latestDue;
+    return -1;
 }
 
 static int pendingPrayerIndex() {
@@ -259,11 +235,8 @@ static bool markPrayed(int prayerIndex) {
     }
 
     current.prayedMask |= (1 << prayerIndex);
-    if (current.snoozedPrayerIndex == prayerIndex) {
-        current.snoozedPrayerIndex = -1;
-        current.snoozeUntilEpoch = 0;
-        current.snoozeCount = 0;
-    }
+    current.snoozeUntilEpoch[prayerIndex] = 0;
+    current.snoozeCount[prayerIndex] = 0;
     persistState();
     Serial.printf("[Prayer] Marked prayed: %s\n", current.prayers[prayerIndex].name);
     updateNextPrayer();  // recalculate immediately so next-prayer display is correct
@@ -283,14 +256,14 @@ static bool snoozePendingPrayer(int forPrayerIndex = -1, int minutes = PRAYER_SN
     if (!getLocalTime(&t)) return false;
     syncDailyState(t);
 
-    // Resolve which prayer to snooze: explicit caller wins, otherwise use latest due.
+    // Resolve which prayer to snooze: explicit caller wins, otherwise use earliest due.
     int prayerIndex = (forPrayerIndex >= 0) ? forPrayerIndex : activePendingIndexForTime(t);
     if (prayerIndex < 0 || !isActionablePrayer(prayerIndex) || isPrayed(prayerIndex)) return false;
 
     // Enforce daily snooze cap per prayer.
-    if (current.snoozeCount >= PRAYER_MAX_SNOOZE_COUNT) {
+    if (current.snoozeCount[prayerIndex] >= PRAYER_MAX_SNOOZE_COUNT) {
         Serial.printf("[Prayer] Snooze cap reached (%d/%d) for %s — ignored.\n",
-                      current.snoozeCount, PRAYER_MAX_SNOOZE_COUNT,
+                      current.snoozeCount[prayerIndex], PRAYER_MAX_SNOOZE_COUNT,
                       current.prayers[prayerIndex].name);
         return false;
     }
@@ -299,14 +272,13 @@ static bool snoozePendingPrayer(int forPrayerIndex = -1, int minutes = PRAYER_SN
     if (isSnoozed(prayerIndex)) return false;
 
     long nowEpoch = epochForLocalTime(t);
-    current.snoozedPrayerIndex = prayerIndex;
-    current.snoozeUntilEpoch = nowEpoch + (minutes * 60L);
-    ++current.snoozeCount;
+    current.snoozeUntilEpoch[prayerIndex] = nowEpoch + (minutes * 60L);
+    ++current.snoozeCount[prayerIndex];
     persistState();
     Serial.printf("[Prayer] Snoozed %s until epoch %ld (snooze %d/%d)\n",
                   current.prayers[prayerIndex].name,
-                  current.snoozeUntilEpoch,
-                  current.snoozeCount,
+                  current.snoozeUntilEpoch[prayerIndex],
+                  current.snoozeCount[prayerIndex],
                   PRAYER_MAX_SNOOZE_COUNT);
     return true;
 }
@@ -327,11 +299,11 @@ static void formatEpochTime(long epochValue, char* buffer, size_t bufferLen) {
     snprintf(buffer, bufferLen, "%02d:%02d", local->tm_hour, local->tm_min);
 }
 
-static bool snoozedUntilText(char* buffer, size_t bufferLen) {
-    if (current.snoozedPrayerIndex < 0 || current.snoozeUntilEpoch <= 0) {
+static bool snoozedUntilText(int prayerIndex, char* buffer, size_t bufferLen) {
+    if (!isActionablePrayer(prayerIndex) || current.snoozeUntilEpoch[prayerIndex] <= 0) {
         return false;
     }
-    formatEpochTime(current.snoozeUntilEpoch, buffer, bufferLen);
+    formatEpochTime(current.snoozeUntilEpoch[prayerIndex], buffer, bufferLen);
     return true;
 }
 
@@ -357,17 +329,15 @@ static RowState rowStateForIndex(int prayerIndex) {
         return ROW_DONE;
     }
 
-    if (prayerIndex == pendingIndex) {
-        return isSnoozed(prayerIndex) ? ROW_SNOOZED : ROW_PENDING;
+    // Any unprayed past prayer can be snoozed or pending independently
+    if (!isPrayed(prayerIndex) && prayerMin <= nowMin) {
+        if (isSnoozed(prayerIndex)) return ROW_SNOOZED;
+        return (prayerIndex == pendingIndex) ? ROW_PENDING : ROW_MISSED;
     }
 
     // Keep the computed next prayer highlighted, including post-Isha rollover to next-day Fajr.
     if (prayerIndex == current.nextIndex) {
         return ROW_UPCOMING;
-    }
-
-    if (!isPrayed(prayerIndex) && prayerMin <= nowMin) {
-        return ROW_MISSED;
     }
 
     if (prayerIndex == upcomingIndex) {
@@ -385,21 +355,20 @@ static ReminderEvent pollReminderEvent() {
     syncDailyState(t);
     long nowEpoch = epochForLocalTime(t);
 
-    // When a snooze has just expired, emit a soft banner event.
-    // Clearing lastDueAlertPrayerIndex here lets the next poll pass re-fire REMINDER_DUE
-    // (which shows the full Azan screen), giving the user a moment to respond first.
-    if (current.snoozeJustExpired) {
-        current.snoozeJustExpired = false;
-        int expiredIndex = current.lastDueAlertPrayerIndex;
-        current.lastDueAlertPrayerIndex = -1;  // allow REMINDER_DUE to re-fire next pass
-        if (expiredIndex >= 0) {
+    // Per-prayer snooze expiry: emit soft banner for the first expired one found.
+    for (int i = 0; i < PRAYER_COUNT; i++) {
+        if (current.snoozeJustExpired[i]) {
+            current.snoozeJustExpired[i] = false;
+            // Allow REMINDER_DUE to re-fire for this prayer on the next poll pass
+            if (current.lastDueAlertPrayerIndex == i) {
+                current.lastDueAlertPrayerIndex = -1;
+            }
             event.type = REMINDER_SNOOZE_EXPIRED;
-            event.prayerIndex = expiredIndex;
+            event.prayerIndex = i;
             event.minutesLeft = 0;
-            Serial.printf("[Prayer] Snooze-expired event: %s\n", current.prayers[expiredIndex].name);
+            Serial.printf("[Prayer] Snooze-expired event: %s\n", current.prayers[i].name);
             return event;
         }
-        // expiredIndex < 0 (boot edge case): fall through to normal DUE logic below.
     }
 
     int pendingIndex = activePendingIndexForTime(t);
@@ -493,6 +462,24 @@ static int currentOrLastPrayerIndex() {
     // Pre-Fajr: no prayer has passed today yet — show Isha (last of previous day)
     if (lastPast < 0) lastPast = PRAYER_COUNT - 1;
     return lastPast;
+}
+
+// ---------------------------------------------------------------------------
+// Count how many actionable prayers are currently missed (unprayed & past due & not snoozed)
+// ---------------------------------------------------------------------------
+static int missedCount() {
+    if (!current.valid) return 0;
+    struct tm t;
+    if (!getLocalTime(&t)) return 0;
+    int nowMin = t.tm_hour * 60 + t.tm_min;
+    int count = 0;
+    for (int i = 0; i < PRAYER_COUNT; i++) {
+        if (!isActionablePrayer(i) || isPrayed(i)) continue;
+        if (toMinutes(current.prayers[i].time) <= nowMin && !isSnoozed(i)) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 // ---------------------------------------------------------------------------

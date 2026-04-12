@@ -66,13 +66,12 @@ static int prayerFetchDay    = -1;
 
 static int  prayerStateDayKey = -1;
 static int  prayerPrayedMask  = 0;
-static int  prayerSnoozeIndex = -1;
-static long prayerSnoozeUntil = 0;
-static int  prayerSnoozeCount = 0;
+static long prayerSnoozeUntil[PRAYER_SLOT_COUNT] = {}; // per-prayer snooze expiry epoch
+static int  prayerSnoozeCount[PRAYER_SLOT_COUNT] = {}; // per-prayer snooze count today
 
 // NVS schema version — bump when key names/formats change between firmware releases.
 // On mismatch the settings namespace is wiped and re-initialised from config.h defaults.
-static constexpr int NVS_VERSION = 1;
+static constexpr int NVS_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Load from NVS (falls back to compiled defaults when key is absent)
@@ -118,9 +117,13 @@ static void load() {
 
     prayerStateDayKey = prefs.getInt("pSDK", prayerStateDayKey);
     prayerPrayedMask  = prefs.getInt("pMask", prayerPrayedMask);
-    prayerSnoozeIndex = prefs.getInt("pSnIx", prayerSnoozeIndex);
-    prayerSnoozeUntil = prefs.getLong("pSnTo", prayerSnoozeUntil);
-    prayerSnoozeCount = prefs.getInt("pSnCt", prayerSnoozeCount);
+    for (int i = 0; i < PRAYER_SLOT_COUNT; i++) {
+        char kTo[8], kCt[8];
+        snprintf(kTo, sizeof(kTo), "pSTo%d", i);
+        snprintf(kCt, sizeof(kCt), "pSCt%d", i);
+        prayerSnoozeUntil[i] = prefs.getLong(kTo, 0);
+        prayerSnoozeCount[i] = prefs.getInt(kCt, 0);
+    }
 
     autoDetectLastOk    = prefs.getBool("adOK", autoDetectLastOk);
     autoDetectLastEpoch = prefs.getLong("adTS", autoDetectLastEpoch);
@@ -169,9 +172,13 @@ static void save() {
 
     prefs.putInt("pSDK", prayerStateDayKey);
     prefs.putInt("pMask", prayerPrayedMask);
-    prefs.putInt("pSnIx", prayerSnoozeIndex);
-    prefs.putLong("pSnTo", prayerSnoozeUntil);
-    prefs.putInt("pSnCt", prayerSnoozeCount);
+    for (int i = 0; i < PRAYER_SLOT_COUNT; i++) {
+        char kTo[8], kCt[8];
+        snprintf(kTo, sizeof(kTo), "pSTo%d", i);
+        snprintf(kCt, sizeof(kCt), "pSCt%d", i);
+        prefs.putLong(kTo, prayerSnoozeUntil[i]);
+        prefs.putInt(kCt, prayerSnoozeCount[i]);
+    }
 
     prefs.putBool("adOK", autoDetectLastOk);
     prefs.putLong("adTS", autoDetectLastEpoch);
@@ -217,9 +224,8 @@ static void resetToDefaults() {
 
     prayerStateDayKey = -1;
     prayerPrayedMask  = 0;
-    prayerSnoozeIndex = -1;
-    prayerSnoozeUntil = 0;
-    prayerSnoozeCount = 0;
+    memset(prayerSnoozeUntil, 0, sizeof(prayerSnoozeUntil));
+    memset(prayerSnoozeCount, 0, sizeof(prayerSnoozeCount));
 
     autoDetectLastOk = false;
     autoDetectLastEpoch = 0;
@@ -277,20 +283,24 @@ static void markPrayerFetched(const tm& t) {
     prefs.end();
 }
 
-static void savePrayerState(int dayKey, int prayedMask, int snoozeIndex, long snoozeUntil, int snoozeCount) {
+static void savePrayerState(int dayKey, int prayedMask,
+                            const long snoozeUntil[PRAYER_SLOT_COUNT],
+                            const int  snoozeCount[PRAYER_SLOT_COUNT]) {
     prayerStateDayKey = dayKey;
     prayerPrayedMask  = prayedMask;
-    prayerSnoozeIndex = snoozeIndex;
-    prayerSnoozeUntil = snoozeUntil;
-    prayerSnoozeCount = snoozeCount;
-    // Write only the 5 prayer-state keys to reduce NVS wear.
+    memcpy(prayerSnoozeUntil, snoozeUntil, sizeof(prayerSnoozeUntil));
+    memcpy(prayerSnoozeCount, snoozeCount, sizeof(prayerSnoozeCount));
     Preferences prefs;
     prefs.begin("settings", false);
     prefs.putInt("pSDK",  prayerStateDayKey);
     prefs.putInt("pMask", prayerPrayedMask);
-    prefs.putInt("pSnIx", prayerSnoozeIndex);
-    prefs.putLong("pSnTo", prayerSnoozeUntil);
-    prefs.putInt("pSnCt", prayerSnoozeCount);
+    for (int i = 0; i < PRAYER_SLOT_COUNT; i++) {
+        char kTo[8], kCt[8];
+        snprintf(kTo, sizeof(kTo), "pSTo%d", i);
+        snprintf(kCt, sizeof(kCt), "pSCt%d", i);
+        prefs.putLong(kTo, prayerSnoozeUntil[i]);
+        prefs.putInt(kCt, prayerSnoozeCount[i]);
+    }
     prefs.end();
 }
 
