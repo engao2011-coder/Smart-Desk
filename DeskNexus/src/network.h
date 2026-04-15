@@ -1217,14 +1217,16 @@ static void reconnect() {
 // ---------------------------------------------------------------------------
 // AP-mode background scan — check if any saved network has come into range
 // ---------------------------------------------------------------------------
-static unsigned long lastAPScanMs = 0;
+static unsigned long lastAPScanMs  = 0;    // 0 = never scanned → fire immediately
+static bool          apScanPending = false; // async scan in progress
 
 /*
  * checkKnownNetworkInAP() — While in AP mode, periodically scan for visible
  * Wi-Fi networks and compare them against the saved-network list.
+ * The scan runs asynchronously to avoid blocking the main loop.
  * If a known SSID is visible and the STA connection succeeds the device
  * restarts so it boots cleanly in STA mode with full initialisation.
- * If the connection attempt fails, the AP is restarted so the portal remains
+ * If the connection attempt fails the AP is restarted so the portal remains
  * accessible.  Call from loop() whenever apActive is true.
  */
 static void checkKnownNetworkInAP() {
@@ -1232,12 +1234,23 @@ static void checkKnownNetworkInAP() {
     if (savedNetworkCount <= 0) return;
 
     unsigned long now = millis();
-    if (lastAPScanMs > 0 && (now - lastAPScanMs) < AP_SCAN_INTERVAL_MS) return;
-    lastAPScanMs = now;
 
-    Serial.println("[Network] AP mode: scanning for known networks...");
+    // Start an async scan when the interval has elapsed (or on first call).
+    if (!apScanPending &&
+        (lastAPScanMs == 0 || (now - lastAPScanMs) >= AP_SCAN_INTERVAL_MS)) {
+        lastAPScanMs  = now;
+        apScanPending = true;
+        WiFi.scanNetworks(true);   // async — returns immediately
+        Serial.println("[Network] AP mode: background WiFi scan started.");
+        return;
+    }
 
-    int n = WiFi.scanNetworks();   // blocking scan (~2-3 s)
+    // Check if the async scan has completed.
+    if (!apScanPending) return;
+    int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING) return;   // still in progress — check next loop
+    apScanPending = false;
+
     if (n <= 0) {
         WiFi.scanDelete();
         Serial.println("[Network] Scan complete — no networks found.");
