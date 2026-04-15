@@ -46,6 +46,10 @@
 // The derived password is displayed on the TFT setup screen.
 #define AP_PASSWORD_PREFIX  "desk"
 
+// How often to scan for known Wi-Fi networks while in AP mode (ms).
+// When a saved SSID becomes visible the device connects and restarts.
+#define AP_SCAN_INTERVAL_MS  60000   // 60 s
+
 // ---------------------------------------------------------------------------
 // Setup Wizard / QR code
 // ---------------------------------------------------------------------------

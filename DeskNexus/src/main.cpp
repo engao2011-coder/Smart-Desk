@@ -401,6 +401,8 @@ void loop() {
                     lastAPUpdate = now;
                     UI::updateAPSetupWaiting();
                 }
+                // If a previously-saved network comes into range, auto-connect.
+                Network::checkKnownNetworkInAP();
                 // handleSave will call ESP.restart(); wizard persists state before
                 break;
             default:
@@ -420,13 +422,15 @@ void loop() {
         return;  // skip normal main loop while wizard is active
     }
 
-    // AP mode (non-wizard) — just update status periodically
+    // AP mode (non-wizard) — update status and check for known networks
     if (Network::apActive && apScreenShown) {
         unsigned long now = millis();
         if (now - lastAPUpdate >= 3000) {
             lastAPUpdate = now;
             UI::updateAPSetupWaiting();
         }
+        // Auto-connect if a saved network becomes visible
+        Network::checkKnownNetworkInAP();
         delay(50);
         return;  // skip normal main loop while in AP mode
     }
