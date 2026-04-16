@@ -147,7 +147,7 @@ static int  homePrayedButtonY = 0;
 // Break reminder state
 static unsigned long breakLastNotify    = 0;     // millis() of last break notification
 static bool          breakScreenActive  = false;  // full-screen break reminder showing
-static unsigned long breakScreenExpiry  = 0;      // when to auto-dismiss break screen
+static unsigned long breakScreenStart   = 0;      // when break screen was shown (for duration calc)
 
 // ── Touch calibration ─────────────────────────────────────────────────────
 static uint16_t calData[5] = TOUCH_CAL_DATA;
@@ -233,8 +233,9 @@ static void begin() {
     theme = isDarkTheme ? THEME_DARK : THEME_LIGHT;
     tft.fillScreen(theme.bg);
 
-    lastTouchMs    = millis();
-    lastPageSwitch = millis();
+    lastTouchMs      = millis();
+    lastPageSwitch   = millis();
+    breakLastNotify  = millis();  // start counting from boot
 }
 
 // ---------------------------------------------------------------------------
@@ -1896,7 +1897,7 @@ static bool shouldFireBreakReminder() {
 // Fire break reminder: show banner and switch to break page
 static void fireBreakReminder() {
     breakScreenActive = true;
-    breakScreenExpiry = millis() + BREAK_REMINDER_SCREEN_MS;
+    breakScreenStart  = millis();
     wake();
     showBanner("Take a break!", BREAK_REMINDER_BANNER_MS, BANNER_GOLD);
     pauseCarousel();
@@ -1905,9 +1906,9 @@ static void fireBreakReminder() {
     Serial.println("[Break] Reminder fired.");
 }
 
-// Auto-dismiss break screen after expiry
+// Auto-dismiss break screen after expiry (rollover-safe)
 static void updateBreakState() {
-    if (breakScreenActive && millis() >= breakScreenExpiry) {
+    if (breakScreenActive && (millis() - breakScreenStart) >= BREAK_REMINDER_SCREEN_MS) {
         dismissBreakReminder();
     }
 }
