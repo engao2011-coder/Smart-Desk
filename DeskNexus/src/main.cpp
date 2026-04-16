@@ -551,6 +551,16 @@ void loop() {
         processPrayerReminderEvent();
     }
 
+    // ── Break reminder check (every 30 s) ─────────────────────────────────
+    static unsigned long lastBreakCheck = 0;
+    if ((now - lastBreakCheck) >= 30000) {
+        lastBreakCheck = now;
+        UI::updateBreakState();      // auto-dismiss expired break screen
+        if (UI::shouldFireBreakReminder()) {
+            UI::fireBreakReminder();
+        }
+    }
+
     // ── Carousel auto-advance (checked every loop iteration) ──────────────
     if (UI::shouldAutoAdvance()) {
         UI::advancePage();           // sets needsRedraw=true
