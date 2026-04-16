@@ -98,7 +98,8 @@ static const Theme THEME_LIGHT = {
 #define PAGE_PRAYER    1
 #define PAGE_FORECAST  2
 #define PAGE_STOCKS    3
-#define PAGE_COUNT     4
+#define PAGE_BREAK     4
+#define PAGE_COUNT     5
 
 namespace UI {
 
@@ -142,6 +143,11 @@ static unsigned long dotPulseStart      = 0;
 // Home page "Prayed" button state (set by drawHomePanel, read by handleTouch)
 static bool homePrayedButtonVisible = false;
 static int  homePrayedButtonY = 0;
+
+// Break reminder state
+static unsigned long breakLastNotify    = 0;     // millis() of last break notification
+static bool          breakScreenActive  = false;  // full-screen break reminder showing
+static unsigned long breakScreenExpiry  = 0;      // when to auto-dismiss break screen
 
 // ── Touch calibration ─────────────────────────────────────────────────────
 static uint16_t calData[5] = TOUCH_CAL_DATA;
@@ -264,6 +270,9 @@ static bool isPageAllowed(int page) {
     if (page == PAGE_FORECAST) {
         return Network::isConnected() && Weather::forecast.valid;
     }
+    if (page == PAGE_BREAK) {
+        return Settings::breakReminderEnabled;
+    }
     return true;
 }
 
@@ -278,13 +287,13 @@ static int nextAllowedPage(int fromPage, int direction) {
     return PAGE_PRAYER;
 }
 
-// Carousel-safe page advance — skips PAGE_HOME (home is the idle landing page,
-// not part of the auto-rotation). Cycles through the 3 detail pages only.
+// Carousel-safe page advance — skips PAGE_HOME and PAGE_BREAK (home is the idle landing page,
+// break is event-driven). Cycles through the detail pages only.
 static int nextCarouselPage(int fromPage, int direction) {
     int page = fromPage;
     for (int i = 0; i < PAGE_COUNT; i++) {
         page = (page + direction + PAGE_COUNT) % PAGE_COUNT;
-        if (page != PAGE_HOME && isPageAllowed(page)) {
+        if (page != PAGE_HOME && page != PAGE_BREAK && isPageAllowed(page)) {
             return page;
         }
     }
@@ -454,6 +463,26 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             needsRedraw = true;
             return true;
         }
+    }
+
+    // Break reminder page — dismiss button
+    if (activePage == PAGE_BREAK && (int)ty >= LAYOUT_PANEL_Y) {
+        const int cardX = 8, cardW = SCREEN_W - 16;
+        const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
+        const int btnW = 120, btnH = 32;
+        const int btnX = cardX + (cardW - btnW) / 2;
+        const int btnY = cardY + cardH - btnH - 12;
+        if ((int)tx >= btnX && (int)tx < btnX + btnW &&
+            (int)ty >= btnY && (int)ty < btnY + btnH) {
+            // Flash button feedback
+            tft.fillRoundRect(btnX, btnY, btnW, btnH, 8, theme.textDim);
+            delay(120);
+            dismissBreakReminder();
+            return true;
+        }
+        // Any tap on break page dismisses it
+        dismissBreakReminder();
+        return true;
     }
 
     // Home page touch zones — drill into detail pages or quick-prayed
@@ -1750,6 +1779,140 @@ static void drawStocksPanel() {
 }
 
 // ---------------------------------------------------------------------------
+// Break Reminder panel (PAGE_BREAK)
+// Shows a friendly reminder to take a break, with elapsed time and dismiss.
+// ---------------------------------------------------------------------------
+static void drawBreakPanel() {
+    fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
+    tft.setFreeFont(nullptr);
+
+    const int cardX = 8, cardW = SCREEN_W - 16;
+    const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
+    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
+
+    int yPos = cardY + 12;
+
+    // Title
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.accent, theme.panel);
+    const char* title = "Time for a Break!";
+    int tw = tft.textWidth(title);
+    tft.setCursor(cardX + (cardW - tw) / 2, yPos + 14);
+    tft.print(title);
+    yPos += 28;
+
+    // Horizontal accent line
+    tft.drawFastHLine(cardX + 20, yPos, cardW - 40, theme.accent);
+    yPos += 10;
+
+    // Body text
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.panel);
+    const char* line1 = "You've been at your desk for";
+    tw = tft.textWidth(line1);
+    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
+    tft.print(line1);
+    yPos += 14;
+
+    // Show how long since last break
+    unsigned long elapsedMs = millis() - breakLastNotify;
+    int elapsedMin = (int)(elapsedMs / 60000UL);
+    if (elapsedMin < 1) elapsedMin = Settings::breakReminderInterval;
+
+    char timeBuf[24];
+    if (elapsedMin >= 60) {
+        int hrs = elapsedMin / 60;
+        int mins = elapsedMin % 60;
+        if (mins > 0)
+            snprintf(timeBuf, sizeof(timeBuf), "%dh %dm", hrs, mins);
+        else
+            snprintf(timeBuf, sizeof(timeBuf), "%d hour%s", hrs, hrs > 1 ? "s" : "");
+    } else {
+        snprintf(timeBuf, sizeof(timeBuf), "%d min", elapsedMin);
+    }
+
+    tft.setTextSize(2);
+    tft.setTextColor(theme.gold, theme.panel);
+    tw = tft.textWidth(timeBuf);
+    tft.setCursor(cardX + (cardW - tw) / 2, yPos + 4);
+    tft.print(timeBuf);
+    yPos += 30;
+
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.panel);
+    const char* line2 = "Stand up, stretch, and rest";
+    tw = tft.textWidth(line2);
+    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
+    tft.print(line2);
+    yPos += 12;
+    const char* line3 = "your eyes for a moment.";
+    tw = tft.textWidth(line3);
+    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
+    tft.print(line3);
+    yPos += 20;
+
+    // "Dismiss" button
+    const int btnW = 120, btnH = 32;
+    const int btnX = cardX + (cardW - btnW) / 2;
+    const int btnY = cardY + cardH - btnH - 12;
+    tft.fillRoundRect(btnX, btnY, btnW, btnH, 8, theme.green);
+    tft.setTextSize(2);
+    tft.setTextColor(theme.textPri, theme.green);
+    const char* btnLabel = "OK";
+    tw = tft.textWidth(btnLabel);
+    tft.setCursor(btnX + (btnW - tw) / 2, btnY + 8);
+    tft.print(btnLabel);
+
+    // Interval info at bottom
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    char intBuf[32];
+    snprintf(intBuf, sizeof(intBuf), "Reminder every %d min", Settings::breakReminderInterval);
+    tw = tft.textWidth(intBuf);
+    tft.setCursor(cardX + (cardW - tw) / 2, btnY - 14);
+    tft.print(intBuf);
+}
+
+// Helper: dismiss break reminder and reset timer
+static void dismissBreakReminder() {
+    breakScreenActive = false;
+    breakLastNotify = millis();
+    if (activePage == PAGE_BREAK) {
+        activePage = PAGE_HOME;
+    }
+    needsRedraw = true;
+}
+
+// Check if a break reminder should fire
+static bool shouldFireBreakReminder() {
+    if (!Settings::breakReminderEnabled) return false;
+    if (breakScreenActive) return false;
+    unsigned long intervalMs = (unsigned long)Settings::breakReminderInterval * 60UL * 1000UL;
+    return (millis() - breakLastNotify) >= intervalMs;
+}
+
+// Fire break reminder: show banner and switch to break page
+static void fireBreakReminder() {
+    breakScreenActive = true;
+    breakScreenExpiry = millis() + BREAK_REMINDER_SCREEN_MS;
+    wake();
+    showBanner("Take a break!", BREAK_REMINDER_BANNER_MS, BANNER_GOLD);
+    pauseCarousel();
+    activePage = PAGE_BREAK;
+    needsRedraw = true;
+    Serial.println("[Break] Reminder fired.");
+}
+
+// Auto-dismiss break screen after expiry
+static void updateBreakState() {
+    if (breakScreenActive && millis() >= breakScreenExpiry) {
+        dismissBreakReminder();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Notification banner (temporary overlay at top of panel)
 // Redesigned: taller (36px), slide-in animation, color-coded by event type
 // ---------------------------------------------------------------------------
@@ -1867,6 +2030,7 @@ static void redraw(bool wifiOk, const String& ipAddr,
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
+        case PAGE_BREAK:    drawBreakPanel();    break;
     }
 
     drawBannerIfActive();
@@ -1905,6 +2069,7 @@ static void updatePanel() {
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
+        case PAGE_BREAK:    drawBreakPanel();    break;
     }
 }
 

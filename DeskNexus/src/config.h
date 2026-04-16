@@ -147,6 +147,16 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 #define STOCK_INTRA_CHANGE_PCT  1.0f   // 1 %
 
 // ---------------------------------------------------------------------------
+// Break Reminder
+// ---------------------------------------------------------------------------
+#define BREAK_REMINDER_ENABLED     true    // Enable break reminder by default
+#define BREAK_REMINDER_INTERVAL_M  60      // Default interval in minutes (1 hour)
+#define BREAK_REMINDER_MIN_M       10      // Minimum configurable interval (minutes)
+#define BREAK_REMINDER_MAX_M       240     // Maximum configurable interval (minutes)
+#define BREAK_REMINDER_BANNER_MS   15000   // Banner notification duration (15 s)
+#define BREAK_REMINDER_SCREEN_MS   120000  // Full-screen reminder duration (2 min)
+
+// ---------------------------------------------------------------------------
 // UI / Display behaviour
 // ---------------------------------------------------------------------------
 #define SCREEN_TIMEOUT_MS   90000   // Dim screen after 90 s of inactivity (0 = never)

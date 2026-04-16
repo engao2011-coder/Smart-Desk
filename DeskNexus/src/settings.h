@@ -48,6 +48,10 @@ static int themeMode = 0;
 // When true, auto-detect will NOT overwrite city/country (user set it manually)
 static bool cityManual = false;
 
+// Break Reminder
+static bool breakReminderEnabled  = BREAK_REMINDER_ENABLED;
+static int  breakReminderInterval = BREAK_REMINDER_INTERVAL_M;  // minutes
+
 // Auto-detection metadata
 static bool autoDetectLastOk = false;
 static long autoDetectLastEpoch = 0;
@@ -132,6 +136,9 @@ static void load() {
     }
     cityManual = prefs.getBool("cityM", cityManual);
 
+    breakReminderEnabled  = prefs.getBool("brkEn", breakReminderEnabled);
+    breakReminderInterval = prefs.getInt("brkInt", breakReminderInterval);
+
     prefs.end();
     Serial.printf("[Settings] Loaded — city=%s  country=%s  method=%d  utc=%ld  cityManual=%d\n",
                   city, country, prayerMethod, utcOffset, (int)cityManual);
@@ -185,6 +192,9 @@ static void save() {
     prefs.putString("adMsg", autoDetectStatus);
     prefs.putBool("cityM", cityManual);
 
+    prefs.putBool("brkEn", breakReminderEnabled);
+    prefs.putInt("brkInt", breakReminderInterval);
+
     prefs.end();
     Serial.println("[Settings] Saved to NVS.");
 }
@@ -232,6 +242,9 @@ static void resetToDefaults() {
     strncpy(autoDetectStatus, "Never run", sizeof(autoDetectStatus) - 1);
     autoDetectStatus[sizeof(autoDetectStatus) - 1] = '\0';
     cityManual = false;
+
+    breakReminderEnabled  = BREAK_REMINDER_ENABLED;
+    breakReminderInterval = BREAK_REMINDER_INTERVAL_M;
 
     Serial.println("[Settings] Reset to compiled defaults.");
 }

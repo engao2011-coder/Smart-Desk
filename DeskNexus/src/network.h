@@ -591,6 +591,28 @@ static String settingsPage() {
     </details>
 
     <details>
+    <summary>Break Reminder</summary>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" name="brkEn" value="1")rawhtml";
+    if (Settings::breakReminderEnabled) html += " checked";
+    html += R"rawhtml(>
+      Enable break reminders
+    </label>
+    <label for="brkInt">Interval (minutes)</label>
+    <input type="number" id="brkInt" name="brkInt" min=")rawhtml";
+    html += String(BREAK_REMINDER_MIN_M);
+    html += R"rawhtml(" max=")rawhtml";
+    html += String(BREAK_REMINDER_MAX_M);
+    html += R"rawhtml(" value=")rawhtml";
+    html += String(Settings::breakReminderInterval);
+    html += R"rawhtml(">
+    <p class="hint">Reminds you to take a break from the screen. Default: 60 minutes. Range: )rawhtml";
+    html += String(BREAK_REMINDER_MIN_M);
+    html += "–" + String(BREAK_REMINDER_MAX_M);
+    html += R"rawhtml( min.</p>
+    </details>
+
+    <details>
     <summary>Stocks</summary>
     <p class="hint">Yahoo Finance symbols. Leave empty to disable. Example: IUSE.L, AAPL, MSFT</p>)rawhtml";
 
@@ -871,6 +893,12 @@ static void handleSaveSettings() {
     Settings::autoDetectLastEpoch = time(nullptr);
     strncpy(Settings::autoDetectStatus, "Manual settings saved", sizeof(Settings::autoDetectStatus) - 1);
     Settings::autoDetectStatus[sizeof(Settings::autoDetectStatus) - 1] = '\0';
+
+    // Break Reminder
+    Settings::breakReminderEnabled = server.hasArg("brkEn") && server.arg("brkEn") == "1";
+    int brkInt = server.arg("brkInt").toInt();
+    if (brkInt >= BREAK_REMINDER_MIN_M && brkInt <= BREAK_REMINDER_MAX_M)
+        Settings::breakReminderInterval = brkInt;
 
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {
