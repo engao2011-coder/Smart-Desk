@@ -164,6 +164,8 @@ static void fillPanel(int y, int h, uint16_t color) {
 
 // Forward declarations for functions used before their definition
 static void playPanelTransition(int direction);
+static void dismissBreakReminder();
+static void showBanner(const char* text, uint32_t durationMs, BannerStyle style);
 
 static void updateTheme() {
     bool wantDark;
