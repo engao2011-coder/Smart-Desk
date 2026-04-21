@@ -67,16 +67,16 @@ static const Theme THEME_DARK = {
 };
 
 static const Theme THEME_LIGHT = {
-    0xFF9A,  // bg         — warm paper
-    0xF758,  // panel      — pale sand
+    0xE71A,  // bg         — warm beige canvas (clearly distinct from white cards)
+    0xFFFF,  // panel      — pure white (strong card elevation vs bg)
     0xD240,  // accent     — burnt orange
     0x18C3,  // textPri    — deep slate
     0x4A49,  // textSec    — strong mid grey
-    0x6B4D,  // textDim    — darker grey (~5:1 contrast)
+    0x738E,  // textDim    — medium grey (~4.8:1 on white, meets WCAG AA)
     0x1A86,  // green      — readable green
     0xD104,  // red        — readable red
     0xBC40,  // gold       — warm amber
-    0xD66F,  // separator  — soft sand line
+    0xA534,  // separator  — neutral mid-grey (visible on both bg and panel)
     0xFE48,  // highlightBg — warm cream
 };
 
@@ -1106,7 +1106,7 @@ static void drawPrayerPanel() {
         bool footerCapHit  = (Prayer::current.snoozeCount[pendingForFooter] >= PRAYER_MAX_SNOOZE_COUNT);
         uint16_t sBg = (footerSnoozed || footerCapHit) ? theme.textDim : theme.gold;
         tft.fillRoundRect(bx2, fy, bW, bH, 8, sBg);
-        tft.setTextColor(theme.bg, sBg);
+        tft.setTextColor(theme.textPri, sBg);
         char sLabelBuf[12];
         if (footerSnoozed)     strncpy(sLabelBuf, "Snoozed",  sizeof(sLabelBuf));
         else if (footerCapHit) strncpy(sLabelBuf, "No More",  sizeof(sLabelBuf));
@@ -1382,7 +1382,7 @@ static void drawAzanScreen() {
     auto drawMosqueIcon = [](int cx, int cy, uint16_t col) {
         // Central dome (upper half — draw circle then mask bottom)
         tft.fillCircle(cx, cy + 10, 22, col);
-        tft.fillRect(cx - 22, cy + 10, 44, 22, theme.bg);  // mask bottom half
+        tft.fillRect(cx - 22, cy + 10, 44, 22, theme.panel);  // mask bottom half
 
         // Dome base
         tft.fillRect(cx - 24, cy + 8, 48, 6, col);
@@ -1397,7 +1397,7 @@ static void drawAzanScreen() {
 
         // Crescent on top of dome (two overlapping circles)
         tft.fillCircle(cx + 2, cy - 12, 6, col);
-        tft.fillCircle(cx - 1, cy - 12, 5, theme.bg);  // cut-out for crescent shape
+        tft.fillCircle(cx - 1, cy - 12, 5, theme.panel);  // cut-out for crescent shape
 
         // Base platform
         tft.fillRect(cx - 36, cy + 13, 72, 4, col);
@@ -1488,7 +1488,7 @@ static void drawAzanScreen() {
     bool azanCapHit  = (Prayer::current.snoozeCount[prayerIndex] >= PRAYER_MAX_SNOOZE_COUNT);
     uint16_t azanSnBg = (azanSnoozed || azanCapHit) ? theme.textDim : theme.gold;
     tft.fillRoundRect(bx2, buttonTop, bW, buttonH, 10, azanSnBg);
-    tft.setTextColor(theme.bg, azanSnBg);
+    tft.setTextColor(theme.textPri, azanSnBg);
     char sLabelBuf[12];
     if (azanSnoozed)     strncpy(sLabelBuf, "Snoozed",  sizeof(sLabelBuf));
     else if (azanCapHit) strncpy(sLabelBuf, "No More",  sizeof(sLabelBuf));
