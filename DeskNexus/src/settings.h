@@ -52,6 +52,9 @@ static bool cityManual = false;
 static bool breakReminderEnabled  = BREAK_REMINDER_ENABLED;
 static int  breakReminderInterval = BREAK_REMINDER_INTERVAL_M;  // minutes
 
+// Stocks currency display — when true prices are converted to EUR
+static bool stockEuro = false;
+
 // Auto-detection metadata
 static bool autoDetectLastOk = false;
 static long autoDetectLastEpoch = 0;
@@ -139,6 +142,8 @@ static void load() {
     breakReminderEnabled  = prefs.getBool("brkEn", breakReminderEnabled);
     breakReminderInterval = prefs.getInt("brkInt", breakReminderInterval);
 
+    stockEuro = prefs.getBool("stkEur", stockEuro);
+
     prefs.end();
     Serial.printf("[Settings] Loaded — city=%s  country=%s  method=%d  utc=%ld  cityManual=%d\n",
                   city, country, prayerMethod, utcOffset, (int)cityManual);
@@ -195,6 +200,8 @@ static void save() {
     prefs.putBool("brkEn", breakReminderEnabled);
     prefs.putInt("brkInt", breakReminderInterval);
 
+    prefs.putBool("stkEur", stockEuro);
+
     prefs.end();
     Serial.println("[Settings] Saved to NVS.");
 }
@@ -245,6 +252,8 @@ static void resetToDefaults() {
 
     breakReminderEnabled  = BREAK_REMINDER_ENABLED;
     breakReminderInterval = BREAK_REMINDER_INTERVAL_M;
+
+    stockEuro = false;
 
     Serial.println("[Settings] Reset to compiled defaults.");
 }

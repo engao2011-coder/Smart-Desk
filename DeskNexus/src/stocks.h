@@ -44,9 +44,15 @@ static Quote quotes[MAX_STOCKS];
 static int   fetchIndex   = 0;       // which symbol to fetch next
 static int   displayIndex = 0;       // which quote to show on screen
 
-static constexpr unsigned long FETCH_RETRY_INTERVAL_MS = 60000;  // 60 s backoff after failure
+static constexpr unsigned long FETCH_RETRY_INTERVAL_MS  = 60000;   // 60 s backoff after failure
+static constexpr unsigned long RATE_REFRESH_INTERVAL_MS = 900000;  // 15 min between rate refreshes
 static unsigned long lastFetchAttemptMs = 0;
 static bool          lastFetchOk        = true;
+
+// EUR exchange rates — updated by fetchExchangeRates()
+static float         usdToEur           = 0.0f;
+static float         gbpToEur           = 0.0f;
+static unsigned long lastRateFetchMs    = 0;
 
 // ---------------------------------------------------------------------------
 // Count configured symbols
@@ -57,6 +63,98 @@ static int symbolCount() {
         if (strlen(Settings::stockSymbols[i]) > 0) n++;
     }
     return n;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch a single EUR exchange rate from Yahoo Finance (e.g. "USDEUR=X").
+// Returns true and sets `rate` on success.
+// ---------------------------------------------------------------------------
+static bool fetchRate(const char* pair, float& rate) {
+    String url = "https://query1.finance.yahoo.com/v8/finance/chart/"
+                 + String(pair) + "?range=1d&interval=1d";
+
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(10000);
+    http.setUserAgent("Mozilla/5.0");
+    int code = http.GET();
+
+    if (code != 200) {
+        Serial.printf("[Stocks] Rate HTTP %d for %s\n", code, pair);
+        http.end();
+        return false;
+    }
+
+    StaticJsonDocument<64> filter;
+    filter["chart"]["result"][0]["meta"]["regularMarketPrice"] = true;
+
+    StaticJsonDocument<256> doc;
+    DeserializationError err = deserializeJson(doc, http.getStream(),
+                                              DeserializationOption::Filter(filter));
+    http.end();
+
+    if (err) return false;
+
+    float v = doc["chart"]["result"][0]["meta"]["regularMarketPrice"] | 0.0f;
+    if (v == 0.0f) return false;
+
+    rate = v;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Fetch USD→EUR and GBP→EUR rates. Call when stockEuro is enabled.
+// ---------------------------------------------------------------------------
+static void fetchExchangeRates() {
+    float r = 0.0f;
+    if (fetchRate("USDEUR=X", r)) {
+        usdToEur = r;
+        Serial.printf("[Stocks] USD→EUR = %.4f\n", usdToEur);
+    }
+    if (fetchRate("GBPEUR=X", r)) {
+        gbpToEur = r;
+        Serial.printf("[Stocks] GBP→EUR = %.4f\n", gbpToEur);
+    }
+    lastRateFetchMs = millis();
+}
+
+// ---------------------------------------------------------------------------
+// Return the EUR-converted price for a quote.
+// Currency is inferred from the exchange suffix:
+//   .L          → GBX (pence) — divide by 100 then apply GBP→EUR
+//   .DE .PA .AS .MI .F .BR .LS .MC → already EUR — no conversion
+//   anything else (no dot, or .NYSE/.NASDAQ/etc.) → USD → apply USD→EUR
+// Returns the raw price unchanged if rates are not yet available.
+// ---------------------------------------------------------------------------
+static float euroPrice(const Quote& q) {
+    if (!Settings::stockEuro) return q.price;
+
+    const char* sym = q.symbol;
+    const char* dot = strrchr(sym, '.');
+
+    if (dot) {
+        const char* ext = dot + 1;
+        // London Stock Exchange quotes are in GBX (pence); divide by 100 → GBP → EUR
+        if (strcmp(ext, "L") == 0) {
+            if (gbpToEur == 0.0f) return q.price;
+            return (q.price / 100.0f) * gbpToEur;
+        }
+        // European exchanges already quoted in EUR
+        if (strcmp(ext, "DE") == 0 || strcmp(ext, "PA") == 0 ||
+            strcmp(ext, "AS") == 0 || strcmp(ext, "MI") == 0 ||
+            strcmp(ext, "F")  == 0 || strcmp(ext, "BR") == 0 ||
+            strcmp(ext, "LS") == 0 || strcmp(ext, "MC") == 0 ||
+            strcmp(ext, "VI") == 0 || strcmp(ext, "HE") == 0) {
+            return q.price;
+        }
+    }
+
+    // Default: treat as USD
+    if (usdToEur == 0.0f) return q.price;
+    return q.price * usdToEur;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +266,15 @@ static bool fetchNext() {
         return false;
     }
 
+    // Refresh EUR exchange rates at the start of each new cycle (fetchIndex == 0)
+    // or when rates have never been fetched.
+    if (Settings::stockEuro &&
+        (lastRateFetchMs == 0 ||
+         (millis() - lastRateFetchMs) >= RATE_REFRESH_INTERVAL_MS) &&
+        fetchIndex == 0) {
+        fetchExchangeRates();
+    }
+
     // Find the next valid slot
     for (int attempt = 0; attempt < MAX_STOCKS; attempt++) {
         fetchIndex = (fetchIndex % MAX_STOCKS);
@@ -232,6 +339,8 @@ static void begin() {
             strncpy(quotes[i].symbol, Settings::stockSymbols[i], sizeof(quotes[i].symbol) - 1);
         }
     }
+    // Reset rate cache so next fetchNext() cycle re-fetches if stockEuro is on
+    lastRateFetchMs = 0;
 }
 
 } // namespace Stocks

@@ -1337,7 +1337,11 @@ static void drawHomePanel() {
 
         // Price below symbol
         char priceBuf[16];
-        snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+        if (Settings::stockEuro) {
+            snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
+        } else {
+            snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+        }
         tft.setTextSize(1);
         tft.setTextColor(theme.textSec, theme.panel);
         tft.setCursor(cardX + 16, yPos + 2);
@@ -1745,7 +1749,11 @@ static void drawStocksPanel() {
             tft.print("Price");
 
             char priceBuf[12];
-            snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+            if (Settings::stockEuro) {
+                snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
+            } else {
+                snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+            }
             tft.setTextColor(theme.textSec, rowBg);
             int priceW = tft.textWidth(priceBuf);
             tft.setCursor(SCREEN_W - priceW - 24, ry + 21);
