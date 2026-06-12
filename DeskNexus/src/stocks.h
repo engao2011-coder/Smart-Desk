@@ -22,6 +22,20 @@
 namespace Stocks {
 
 // ---------------------------------------------------------------------------
+// Fetch status — lets the UI tell "still loading" apart from "user must fix"
+// ---------------------------------------------------------------------------
+enum FetchStatus : uint8_t {
+    STATUS_PENDING = 0,    // never fetched successfully yet — still loading
+    STATUS_OK,             // last fetch succeeded
+    STATUS_TEMP_ERROR,     // transient (network / rate-limit / parse) — keep retrying
+    STATUS_BAD_SYMBOL,     // not found / delisted / no quote — USER must fix the symbol
+};
+
+// Show the "check symbol" hint after this many consecutive soft failures,
+// even if the error wasn't a definitive 404 (avoids flapping on a single miss).
+static constexpr uint8_t ATTENTION_FAIL_THRESHOLD = 4;
+
+// ---------------------------------------------------------------------------
 // Data model
 // ---------------------------------------------------------------------------
 struct Quote {
@@ -40,6 +54,8 @@ struct Quote {
     bool   valid          = false;
     bool   alertTriggered = false;    // true if |changePct| >= STOCK_ALERT_PCT
     unsigned long fetchedAt = 0;
+    FetchStatus status    = STATUS_PENDING;
+    uint8_t failCount     = 0;        // consecutive failed fetches (reset on success)
 };
 
 static Quote quotes[MAX_STOCKS];
@@ -160,9 +176,35 @@ static float euroPrice(const Quote& q) {
 }
 
 // ---------------------------------------------------------------------------
+// Percentage to display for a quote, honouring the system-wide metric choice
+// (Settings::stockFromPeak). Falls back to the daily change when 52-week-high
+// data is unavailable so a symbol is never left blank. Used by both the
+// summary page and the stocks page so they always agree.
+// ---------------------------------------------------------------------------
+static float metricPct(const Quote& q) {
+    if (Settings::stockFromPeak && q.fiftyTwoWeekHigh != 0.0f) {
+        return q.changeFromPeakPct;
+    }
+    return q.changePct;
+}
+
+// ---------------------------------------------------------------------------
 // Fetch one quote (blocking). Returns true on success.
 // Call from loop() via shouldFetchNext().
 // ---------------------------------------------------------------------------
+// Record a failed fetch on the quote without disturbing the last good price.
+static void markFailure(int idx, FetchStatus st) {
+    Quote& q = quotes[idx];
+    if (q.failCount < 255) q.failCount++;
+    // A definitive 404/delisted is bad immediately; soft errors escalate to
+    // "bad symbol" only after several consecutive misses.
+    if (st == STATUS_BAD_SYMBOL || q.failCount >= ATTENTION_FAIL_THRESHOLD) {
+        q.status = STATUS_BAD_SYMBOL;
+    } else {
+        q.status = STATUS_TEMP_ERROR;
+    }
+}
+
 static bool fetchOne(int idx) {
     if (idx < 0 || idx >= MAX_STOCKS) return false;
     const char* sym = Settings::stockSymbols[idx];
@@ -185,6 +227,9 @@ static bool fetchOne(int idx) {
     if (code != 200) {
         Serial.printf("[Stocks] HTTP %d for %s\n", code, sym);
         http.end();
+        // 404 = symbol genuinely not found; other codes (401/429/5xx/timeout)
+        // are transient and worth retrying.
+        markFailure(idx, code == 404 ? STATUS_BAD_SYMBOL : STATUS_TEMP_ERROR);
         return false;
     }
 
@@ -206,17 +251,20 @@ static bool fetchOne(int idx) {
 
     if (err) {
         Serial.printf("[Stocks] JSON parse error: %s\n", err.c_str());
+        markFailure(idx, STATUS_TEMP_ERROR);
         return false;
     }
 
     if (!doc["chart"]["error"].isNull()) {
         Serial.printf("[Stocks] Provider error for %s\n", sym);
+        markFailure(idx, STATUS_BAD_SYMBOL);    // e.g. "Not Found, symbol may be delisted"
         return false;
     }
 
     JsonVariant result = doc["chart"]["result"][0];
     if (result.isNull()) {
         Serial.printf("[Stocks] No result for %s\n", sym);
+        markFailure(idx, STATUS_BAD_SYMBOL);
         return false;
     }
 
@@ -226,6 +274,9 @@ static bool fetchOne(int idx) {
 
     if (price == 0.0f) {
         Serial.printf("[Stocks] No quote data for %s\n", sym);
+        // Parsed OK but no usable price — treat as soft error so a brief
+        // pre-market gap doesn't immediately flag the symbol as bad.
+        markFailure(idx, STATUS_TEMP_ERROR);
         return false;
     }
 
@@ -251,6 +302,8 @@ static bool fetchOne(int idx) {
 
     quote.valid       = true;
     quote.fetchedAt   = millis();
+    quote.status      = STATUS_OK;
+    quote.failCount   = 0;
     quote.alertTriggered = (fabsf(quote.changePct) >= STOCK_ALERT_PCT);
 
     Serial.printf("[Stocks] %s  $%.2f  %+.2f%%\n",
@@ -289,7 +342,10 @@ static bool fetchNext() {
         if (strlen(Settings::stockSymbols[fetchIndex]) > 0) {
             lastFetchAttemptMs = millis();
             bool ok = fetchOne(fetchIndex);
-            lastFetchOk = ok;
+            // Only back off for transient errors. A permanently bad symbol
+            // returns quickly and shouldn't impose a 60 s cooldown on the
+            // healthy symbols sharing this round-robin.
+            lastFetchOk = ok || (quotes[fetchIndex].status == STATUS_BAD_SYMBOL);
             fetchIndex++;
             return ok;
         }
@@ -311,6 +367,25 @@ static void nextDisplay() {
 }
 
 // ---------------------------------------------------------------------------
+// True when a configured symbol has failed to fetch in a way the user should
+// fix (not found / delisted, or repeatedly failing). Drives the "check symbol"
+// hint on-screen and in the web UI.
+// ---------------------------------------------------------------------------
+static bool needsAttention(int idx) {
+    if (idx < 0 || idx >= MAX_STOCKS) return false;
+    if (strlen(Settings::stockSymbols[idx]) == 0) return false;
+    return !quotes[idx].valid && quotes[idx].status == STATUS_BAD_SYMBOL;
+}
+
+// True when any configured symbol needs the user's attention.
+static bool anyNeedsAttention() {
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        if (needsAttention(i)) return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Check if any stock has an active alert
 // ---------------------------------------------------------------------------
 static bool hasAlert() {
@@ -321,15 +396,16 @@ static bool hasAlert() {
 }
 
 // ---------------------------------------------------------------------------
-// Return the index of the quote with the largest |changePct| (top mover).
-// Returns -1 if no valid quotes exist.
+// Return the index of the quote with the largest move by the active metric
+// (daily change or from-peak, per Settings::stockFromPeak). Returns -1 if no
+// valid quotes exist.
 // ---------------------------------------------------------------------------
 static int topMoverIndex() {
     int best = -1;
     float bestAbs = -1.0f;
     for (int i = 0; i < MAX_STOCKS; i++) {
         if (!quotes[i].valid) continue;
-        float a = fabsf(quotes[i].changePct);
+        float a = fabsf(metricPct(quotes[i]));
         if (a > bestAbs) {
             bestAbs = a;
             best = i;
@@ -343,8 +419,16 @@ static int topMoverIndex() {
 // ---------------------------------------------------------------------------
 static void begin() {
     for (int i = 0; i < MAX_STOCKS; i++) {
+        // Symbols may have changed — reset per-slot fetch state so a corrected
+        // ticker starts fresh as "loading" instead of keeping a stale error.
+        quotes[i].status    = STATUS_PENDING;
+        quotes[i].failCount = 0;
         if (strlen(Settings::stockSymbols[i]) > 0) {
             strncpy(quotes[i].symbol, Settings::stockSymbols[i], sizeof(quotes[i].symbol) - 1);
+        } else {
+            // Slot cleared — drop any old data so it doesn't linger on screen.
+            quotes[i].valid = false;
+            quotes[i].symbol[0] = '\0';
         }
     }
     // Reset rate cache so next fetchNext() cycle re-fetches if stockEuro is on

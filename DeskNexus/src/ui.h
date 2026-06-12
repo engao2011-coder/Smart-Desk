@@ -1316,7 +1316,8 @@ static void drawHomePanel() {
         tft.print("No data");
     } else {
         const Stocks::Quote& q = Stocks::quotes[topIdx];
-        uint16_t pctColor = (q.changePct >= 0) ? theme.green : theme.red;
+        float mPct = Stocks::metricPct(q);
+        uint16_t pctColor = (mPct >= 0) ? theme.green : theme.red;
         uint16_t edgeColor = pctColor;
 
         // Edge bar
@@ -1330,8 +1331,8 @@ static void drawHomePanel() {
 
         // % change (right, with arrow)
         char pctBuf[16];
-        const char* arrow = (q.changePct >= 0) ? " +" : " ";
-        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, q.changePct);
+        const char* arrow = (mPct >= 0) ? " +" : " ";
+        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, mPct);
         tft.setTextColor(pctColor, theme.panel);
         int pw = tft.textWidth(pctBuf);
         tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
@@ -1686,19 +1687,17 @@ static void drawStocksPanel() {
         order[orderCount++] = i;
     }
 
-    // Stable insertion sort: valid quotes first, then by |changeFromPeakPct| descending.
+    // Stable insertion sort: valid quotes first, then by |active metric| descending.
     for (int i = 1; i < orderCount; i++) {
         int key = order[i];
         const Stocks::Quote& kq = Stocks::quotes[key];
-        float keyVal = kq.changeFromPeakPct;
-        float keyAbs = keyVal >= 0 ? keyVal : -keyVal;
+        float keyAbs = fabsf(Stocks::metricPct(kq));
         float keyRank = kq.valid ? keyAbs : -1.0f;
         int j = i - 1;
 
         while (j >= 0) {
             const Stocks::Quote& jq = Stocks::quotes[order[j]];
-            float jVal = jq.changeFromPeakPct;
-            float jAbs = jVal >= 0 ? jVal : -jVal;
+            float jAbs = fabsf(Stocks::metricPct(jq));
             float jRank = jq.valid ? jAbs : -1.0f;
             if (jRank >= keyRank) break;
             order[j + 1] = order[j];
@@ -1718,23 +1717,36 @@ static void drawStocksPanel() {
         uint16_t edgeColor = theme.separator;
 
         if (q.valid) {
-            float peakPct = (q.fiftyTwoWeekHigh != 0.0f) ? q.changeFromPeakPct : q.changePct;
-            edgeColor = (peakPct >= 0) ? theme.green : theme.red;
+            edgeColor = (Stocks::metricPct(q) >= 0) ? theme.green : theme.red;
         }
 
         tft.fillRect(14, ry, SCREEN_W - 28, ROW_H - 2, rowBg);
         tft.fillRect(14, ry, 5, ROW_H - 2, edgeColor);
 
         if (!q.valid) {
+            bool badSym = Stocks::needsAttention(i);
             tft.setTextSize(2);
-            tft.setTextColor(theme.textDim, rowBg);
+            // Symbol in the alert colour when it needs fixing, dim otherwise.
+            tft.setTextColor(badSym ? theme.gold : theme.textDim, rowBg);
             tft.setCursor(26, ry + 8);
             tft.print(Settings::stockSymbols[i]);
-            tft.setCursor(154, ry + 8);
-            tft.print("...");
+
+            if (badSym) {
+                // Tell the user this symbol is the problem, not the network.
+                tft.setTextSize(1);
+                tft.setTextColor(theme.red, rowBg);
+                const char* msg = "CHECK SYMBOL";
+                int mw = tft.textWidth(msg);
+                tft.setCursor(SCREEN_W - mw - 24, ry + 12);
+                tft.print(msg);
+            } else {
+                tft.setTextColor(theme.textDim, rowBg);
+                tft.setCursor(154, ry + 8);
+                tft.print("...");
+            }
         } else {
-            // Use from-peak % if available, else fall back to daily change
-            float displayPct = (q.fiftyTwoWeekHigh != 0.0f) ? q.changeFromPeakPct : q.changePct;
+            // Active metric (daily or from-peak), per Settings::stockFromPeak
+            float displayPct = Stocks::metricPct(q);
             uint16_t pctColor = (displayPct >= 0) ? theme.green : theme.red;
 
             // Row 1: Symbol + Change % (size 2) — primary signal

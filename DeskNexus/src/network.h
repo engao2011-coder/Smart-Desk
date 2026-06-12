@@ -80,9 +80,17 @@ static const char* getApPassword() {
 // ---------------------------------------------------------------------------
 static const char* WEB_ADMIN_USER = "admin";
 
+// Active web-admin password: the user-set override if present, otherwise the
+// MAC-derived AP password. Kept separate from getApPassword() so changing the
+// admin password does not affect the AP (hotspot) join password.
+static const char* getAdminPassword() {
+    if (Settings::adminPassword[0] != '\0') return Settings::adminPassword;
+    return getApPassword();
+}
+
 // True when the request carries valid credentials (does not send a response).
 static bool isAuthed() {
-    return server.authenticate(WEB_ADMIN_USER, getApPassword());
+    return server.authenticate(WEB_ADMIN_USER, getAdminPassword());
 }
 
 // Gate a handler: returns true if authorised, otherwise sends a 401 challenge
@@ -656,10 +664,26 @@ static String settingsPage() {
       Show prices in EUR (uses live USD/GBP&rarr;EUR exchange rate from Yahoo Finance)
     </label>
     <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" name="stkPeak" value="1")rawhtml";
+    if (Settings::stockFromPeak) html += " checked";
+    html += R"rawhtml(>
+      Show change vs 52-week high (off = daily change vs previous close)
+    </label>
+    <p class="hint">Applies to both the summary page and the stocks page. When a symbol has no 52-week high data, it falls back to the daily change.</p>
     )rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
-        html += "<label>Symbol " + String(i + 1) + "</label>";
+        html += "<label>Symbol " + String(i + 1);
+        // Live fetch status next to the input the user edits to fix it.
+        if (strlen(Settings::stockSymbols[i]) > 0) {
+            const char* txt; const char* col;
+            if (Stocks::needsAttention(i))    { txt = "&#10007; not found &mdash; check symbol"; col = "#e74c3c"; }
+            else if (Stocks::quotes[i].valid) { txt = "&#10003; ok";                              col = "#4ecca3"; }
+            else                              { txt = "&hellip; loading";                         col = "#9aa0a6"; }
+            html += " <span style=\"font-size:.78rem;font-weight:600;color:" + String(col) + "\">" + txt + "</span>";
+        }
+        html += "</label>";
         html += "<input type=\"text\" name=\"stk" + String(i) +
                 "\" maxlength=\"23\" value=\"" + String(Settings::stockSymbols[i]) +
                 "\" placeholder=\"e.g. IUSE.L\" style=\"text-transform:uppercase\">";
@@ -668,6 +692,24 @@ static String settingsPage() {
     html += R"rawhtml(
     </details>
 
+    <details>
+    <summary>Admin Password</summary>
+    <p class="hint">Protects the settings page and firmware updates. User name is always <b>admin</b>.</p>
+    <p class="hint">Currently using: )rawhtml";
+    html += Settings::adminPassword[0] ? "a custom password." : "the default device password (shown on the setup screen).";
+    html += R"rawhtml(</p>
+    <label for="admPw">New password</label>
+    <input type="password" id="admPw" name="admPw" maxlength="63" value="" placeholder="leave blank to keep current" autocomplete="new-password">
+    <label for="admPw2">Confirm new password</label>
+    <input type="password" id="admPw2" name="admPw2" maxlength="63" value="" placeholder="repeat new password" autocomplete="new-password">
+    <p class="hint">Minimum 8 characters. Leave both blank to keep the current password. After changing it your browser will ask you to sign in again.</p>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" name="admPwClear" value="1">
+      Reset to the default device password
+    </label>
+    )rawhtml";
+
+    html += R"rawhtml(
     <input type="submit" value="Save Settings">
   </form>
 
@@ -712,6 +754,26 @@ display:flex;justify-content:center;align-items:center;min-height:100vh}</style>
 <body><h2 style="color:#4ecca3">&#10003; Settings saved!<br>Refreshing data...</h2></body>
 </html>
 )rawhtml";
+}
+
+// Error page shown when a submitted setting fails validation. Nothing was
+// saved; the user goes back to fix the form.
+static String settingsErrorPage(const char* msg) {
+    String html = R"rawhtml(
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Not saved</title>
+<style>body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
+display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:100vh;text-align:center;margin:0;padding:0 16px}
+a{color:#4ecca3}</style>
+</head>
+<body><h2 style="color:#e94560">&#9888; Not saved</h2><p>)rawhtml";
+    html += htmlEscape(String(msg));
+    html += R"rawhtml(</p><p>No changes were applied. <a href="/settings">Go back</a> and try again.</p></body>
+</html>
+)rawhtml";
+    return html;
 }
 
 
@@ -906,6 +968,32 @@ static void handleSaveSettings() {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
     }
+
+    // ── Admin password (validate before mutating anything) ────────────────
+    // admPwClear takes precedence; otherwise a non-empty admPw sets a new one.
+    bool admPwClear = server.hasArg("admPwClear") && server.arg("admPwClear") == "1";
+    String admPw  = server.arg("admPw");
+    String admPw2 = server.arg("admPw2");
+    bool   admPwApply = false;   // true => write admPw into Settings below
+    if (!admPwClear && admPw.length() > 0) {
+        if (admPw.length() < 8) {
+            server.send(400, "text/html",
+                settingsErrorPage("Admin password must be at least 8 characters."));
+            return;
+        }
+        if (admPw != admPw2) {
+            server.send(400, "text/html",
+                settingsErrorPage("Admin passwords do not match."));
+            return;
+        }
+        if (admPw.length() >= sizeof(Settings::adminPassword)) {
+            server.send(400, "text/html",
+                settingsErrorPage("Admin password is too long."));
+            return;
+        }
+        admPwApply = true;
+    }
+
     // City / Country
     String v = server.arg("city");
     if (v.length() > 0 && v.length() < sizeof(Settings::city)) {
@@ -958,6 +1046,9 @@ static void handleSaveSettings() {
     // Stocks — currency display
     Settings::stockEuro = server.hasArg("stkEur") && server.arg("stkEur") == "1";
 
+    // Stocks — change metric (52-week high vs daily change)
+    Settings::stockFromPeak = server.hasArg("stkPeak") && server.arg("stkPeak") == "1";
+
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {
         String key = "stk" + String(i);
@@ -975,6 +1066,14 @@ static void handleSaveSettings() {
     v.trim();
     if (v.length() > 0 && v.length() < sizeof(Settings::owmApiKey))
         strncpy(Settings::owmApiKey, v.c_str(), sizeof(Settings::owmApiKey) - 1);
+
+    // Apply admin-password change (already validated above)
+    if (admPwClear) {
+        Settings::adminPassword[0] = '\0';
+    } else if (admPwApply) {
+        strncpy(Settings::adminPassword, admPw.c_str(), sizeof(Settings::adminPassword) - 1);
+        Settings::adminPassword[sizeof(Settings::adminPassword) - 1] = '\0';
+    }
 
     Settings::save();
 
