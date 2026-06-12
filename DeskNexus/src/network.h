@@ -621,7 +621,13 @@ static String settingsPage() {
     html += R"rawhtml(>
       Show prices in EUR (uses live USD/GBP&rarr;EUR exchange rate from Yahoo Finance)
     </label>
-    <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>)rawhtml";
+    <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" name="stkPeak" value="1")rawhtml";
+    if (Settings::stockFromPeak) html += " checked";
+    html += R"rawhtml(>
+      Show change from 52-week high (peak) instead of daily change
+    </label>)rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
         html += "<label>Symbol " + String(i + 1) + "</label>";
@@ -909,6 +915,8 @@ static void handleSaveSettings() {
 
     // Stocks — currency display
     Settings::stockEuro = server.hasArg("stkEur") && server.arg("stkEur") == "1";
+    // Stocks — from-peak display
+    Settings::stockFromPeak = server.hasArg("stkPeak") && server.arg("stkPeak") == "1";
 
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {

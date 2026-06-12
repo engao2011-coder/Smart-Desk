@@ -34,6 +34,8 @@ struct Quote {
     float  open           = 0.0f;
     float  high           = 0.0f;
     float  low            = 0.0f;
+    float  fiftyTwoWeekHigh = 0.0f;   // 52-week high
+    float  changeFromPeakPct = 0.0f;  // percentage change from 52-week high
     long   volume         = 0;
     bool   valid          = false;
     bool   alertTriggered = false;    // true if |changePct| >= STOCK_ALERT_PCT
@@ -191,6 +193,7 @@ static bool fetchOne(int idx) {
     filter["chart"]["error"]                                                 = true;
     filter["chart"]["result"][0]["meta"]["regularMarketPrice"]               = true;
     filter["chart"]["result"][0]["meta"]["chartPreviousClose"]               = true;
+    filter["chart"]["result"][0]["meta"]["fiftyTwoWeekHigh"]                 = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["open"]           = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["high"]           = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["low"]            = true;
@@ -219,6 +222,7 @@ static bool fetchOne(int idx) {
 
     float price     = result["meta"]["regularMarketPrice"] | 0.0f;
     float prevClose = result["meta"]["chartPreviousClose"]  | 0.0f;
+    float week52High = result["meta"]["fiftyTwoWeekHigh"]   | 0.0f;
 
     if (price == 0.0f) {
         Serial.printf("[Stocks] No quote data for %s\n", sym);
@@ -239,6 +243,10 @@ static bool fetchOne(int idx) {
     quote.change    = price - prevClose;
     quote.changePct = (prevClose != 0.0f)
                         ? ((price - prevClose) / prevClose * 100.0f)
+                        : 0.0f;
+    quote.fiftyTwoWeekHigh = week52High;
+    quote.changeFromPeakPct = (week52High != 0.0f)
+                        ? ((price - week52High) / week52High * 100.0f)
                         : 0.0f;
 
     quote.valid       = true;
