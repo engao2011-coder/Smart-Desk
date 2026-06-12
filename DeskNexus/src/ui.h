@@ -167,6 +167,7 @@ static void fillPanel(int y, int h, uint16_t color) {
 static void playPanelTransition(int direction);
 static void dismissBreakReminder();
 static void showBanner(const char* text, uint32_t durationMs, BannerStyle style);
+static void drawPanelChevrons();
 
 static void updateTheme() {
     bool wantDark;
@@ -776,19 +777,21 @@ static void drawHero(const struct tm& t) {
         tft.setTextSize(1);
         tft.setTextColor(theme.textDim, theme.panel);
         if (Weather::current.fetchState == Weather::WEATHER_NO_KEY) {
-            // Friendly hint instead of error — weather is optional
-            tft.setCursor(rZoneX, cardY + 22);
+            // Friendly hint instead of error — weather is optional.
+            // The full setup URL lives on the dedicated setup screens; here
+            // we just point the user at Settings without cramming five
+            // tight lines into the ~76px hero corner.
+            tft.setTextColor(theme.textSec, theme.panel);
+            tft.setCursor(rZoneX, cardY + 26);
             tft.print("Weather");
-            tft.setCursor(rZoneX, cardY + 34);
-            tft.print("Setup at");
-            tft.setTextColor(theme.accent, theme.panel);
-            tft.setCursor(rZoneX, cardY + 46);
-            tft.print("desknexus");
-            tft.setCursor(rZoneX, cardY + 58);
-            tft.print(".local");
             tft.setTextColor(theme.textDim, theme.panel);
-            tft.setCursor(rZoneX, cardY + 72);
-            tft.print("/settings");
+            tft.setCursor(rZoneX, cardY + 44);
+            tft.print("Add API");
+            tft.setCursor(rZoneX, cardY + 56);
+            tft.print("key in");
+            tft.setTextColor(theme.accent, theme.panel);
+            tft.setCursor(rZoneX, cardY + 70);
+            tft.print("Settings");
         } else {
             const char* line2 = "loading...";
             if (Weather::current.fetchState == Weather::WEATHER_NET_ERROR) line2 = "Net error";
@@ -1081,15 +1084,7 @@ static void drawPrayerPanel() {
         }
     }
 
-    // Touch affordance chevrons
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print("<");
-    int rw = tft.textWidth(">");
-    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print(">");
+    drawPanelChevrons();
 
     if (footerH > 0) {
         int bW = SCREEN_W / 2 - 18;
@@ -1126,8 +1121,10 @@ static void drawPrayerPanel() {
 // Home / Dashboard panel (y=124..319) — summary: current prayer + next prayer
 // + top-moving stock. Tap sections to drill into detail pages.
 // ---------------------------------------------------------------------------
-// Left/right touch-affordance chevrons on the Home card.
-static void drawHomeChevrons() {
+// Left/right touch-affordance chevrons drawn on every carousel panel
+// (Home, Prayer, Forecast, Stocks). Single source of truth so the four
+// panels stay visually identical.
+static void drawPanelChevrons() {
     tft.setFreeFont(nullptr);
     tft.setTextSize(2);
     tft.setTextColor(theme.textDim, theme.bg);
@@ -1136,6 +1133,20 @@ static void drawHomeChevrons() {
     int rw = tft.textWidth(">");
     tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
     tft.print(">");
+}
+
+// Right-aligned "tap >" disclosure hint, drawn level with a Home section
+// header to signal that tapping the section drills into its detail page.
+// Distinguished from the dim carousel chevrons by the accent colour.
+static void drawTapHint(int cardX, int cardW, int y) {
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.accent, theme.panel);
+    const char* hint = "tap >";
+    int hw = tft.textWidth(hint);
+    tft.setCursor(cardX + cardW - hw - 10, y);
+    tft.print(hint);
+    tft.setTextColor(theme.textDim, theme.panel);
 }
 
 // Geometry of the Home card's rotating Stocks section, recorded on each full
@@ -1150,6 +1161,7 @@ static void drawHomeStockSection(int cardX, int cardW, int yPos) {
     tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(cardX + 10, yPos);
     tft.print("Stocks");
+    drawTapHint(cardX, cardW, yPos);
     yPos += 12;
 
     int topIdx = Stocks::displayQuoteIndex();
@@ -1189,7 +1201,7 @@ static void drawHomeStockSection(int cardX, int cardW, int yPos) {
         // Price below symbol
         char priceBuf[16];
         if (Settings::stockEuro) {
-            snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
+            snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
         } else {
             snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
         }
@@ -1218,10 +1230,13 @@ static void drawHomePanel() {
     int yPos = cardY + 6;
 
     // ── Section 1: Current Prayer ──────────────────────────────────────────
+    // The prayer region (top ~2/3 of the card) drills into the full prayer
+    // list on tap; the "tap >" hint on this header advertises that.
     tft.setTextSize(1);
     tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(cardX + 10, yPos);
     tft.print("Current Prayer");
+    drawTapHint(cardX, cardW, yPos);
     yPos += 12;
 
     int curIdx = Prayer::currentOrLastPrayerIndex();
@@ -1382,7 +1397,7 @@ static void drawHomePanel() {
     // ── Section 3: Stocks (rotates through all symbols) ────────────────────
     drawHomeStockSection(cardX, cardW, yPos);
 
-    drawHomeChevrons();
+    drawPanelChevrons();
 
     // Reset text state
     tft.setFreeFont(nullptr);
@@ -1398,7 +1413,7 @@ static void updateHomeStockSection() {
     // redraw it, then re-stamp the chevrons in case the clear overlapped them.
     tft.fillRect(homeStockSecX + 2, homeStockSecY - 2, homeStockSecW - 4, 58, theme.panel);
     drawHomeStockSection(homeStockSecX, homeStockSecW, homeStockSecY);
-    drawHomeChevrons();
+    drawPanelChevrons();
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
@@ -1672,14 +1687,7 @@ static void drawForecastPanel() {
         shown++;
     }
 
-    // Touch affordance chevrons
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print("<");
-    int rw = tft.textWidth(">");
-    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print(">");
+    drawPanelChevrons();
 
     // Reset text state
     tft.setFreeFont(nullptr);
@@ -1795,21 +1803,18 @@ static void drawStocksPanel() {
             tft.setCursor(SCREEN_W - pctW - 24, ry + 2);
             tft.print(pctBuf);
 
-            // Row 2: Price (size 1) — secondary context
-            tft.setTextSize(1);
-            tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(26, ry + 21);
-            tft.print("Price");
-
-            char priceBuf[12];
+            // Row 2: Price under the symbol — secondary context.
+            // Left-aligned so each row reads top-down: symbol / price on the
+            // left, % change on the right (no redundant "Price" label).
+            char priceBuf[14];
             if (Settings::stockEuro) {
-                snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
+                snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
             } else {
                 snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
             }
+            tft.setTextSize(1);
             tft.setTextColor(theme.textSec, rowBg);
-            int priceW = tft.textWidth(priceBuf);
-            tft.setCursor(SCREEN_W - priceW - 24, ry + 21);
+            tft.setCursor(26, ry + 21);
             tft.print(priceBuf);
 
             // Alert dot
@@ -1825,14 +1830,7 @@ static void drawStocksPanel() {
         shown++;
     }
 
-    // Touch affordance chevrons
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print("<");
-    int rw = tft.textWidth(">");
-    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print(">");
+    drawPanelChevrons();
 
     if (shown == 0) {
         tft.setTextSize(2);
