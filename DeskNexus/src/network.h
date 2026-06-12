@@ -303,41 +303,106 @@ static String wifiScanHTML() {
     return options;
 }
 
-static String portalPage() {
-    String html = R"rawhtml(
-<!DOCTYPE html>
+// ---------------------------------------------------------------------------
+// Shared web-page styling
+// Rules common to every full page (portal, status, settings, OTA) live in
+// STYLE_BASE so the dark theme stays consistent and isn't copy-pasted four
+// times. Each page appends its own rules after the base.
+// ---------------------------------------------------------------------------
+static const char STYLE_BASE[] =
+  "body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;"
+  "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
+  ".card{background:#16213e;border-radius:12px;padding:32px;max-width:420px;width:90%;"
+  "box-shadow:0 4px 24px #0005}"
+  "h2{margin:0 0 24px;color:#e94560;text-align:center}"
+  "input[type=submit]:hover{background:#c73652}";
+
+static const char PORTAL_CSS[] =
+  ".card{max-width:400px}"
+  "label{display:block;margin:12px 0 4px;font-size:.9rem}"
+  "select,input{width:100%;padding:10px;border:none;border-radius:6px;"
+  "background:#0f3460;color:#eee;font-size:1rem;box-sizing:border-box}"
+  "input[type=submit]{background:#e94560;cursor:pointer;margin-top:20px;font-weight:bold}"
+  ".msg{text-align:center;color:#4ecca3;margin-top:16px;font-size:.9rem}"
+  ".pw-wrap{position:relative}.pw-wrap input{padding-right:44px}"
+  ".pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);"
+  "background:none;border:none;color:#4ecca3;cursor:pointer;font-size:1.1rem;padding:4px 6px;width:auto}"
+  ".refresh{display:inline-block;margin:6px 0;color:#4ecca3;font-size:.8rem;"
+  "cursor:pointer;text-decoration:underline;background:none;border:none}"
+  "#overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;"
+  "background:#1a1a2e;z-index:999;flex-direction:column;justify-content:center;align-items:center}"
+  ".spinner{width:48px;height:48px;border:4px solid #0f3460;border-top-color:#e94560;"
+  "border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}"
+  "@keyframes spin{to{transform:rotate(360deg)}}";
+
+static const char STATUS_CSS[] =
+  "table{width:100%;border-collapse:collapse}"
+  "td{padding:10px 8px;border-bottom:1px solid #0f3460;font-size:.95rem}"
+  "td:first-child{color:#4ecca3;font-weight:bold;width:40%}"
+  ".badge{display:inline-block;background:#4ecca3;color:#1a1a2e;border-radius:4px;"
+  "padding:2px 8px;font-size:.8rem;font-weight:bold}"
+  "a.btn{display:block;text-align:center;margin-top:24px;padding:10px;"
+  "background:#e94560;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}"
+  "a.btn:hover{background:#c73652}"
+  ".btn-link{display:block;text-align:center;margin-top:14px;color:#9aa0a6;"
+  "font-size:.85rem;text-decoration:none}.btn-link:hover{color:#4ecca3}";
+
+static const char SETTINGS_CSS[] =
+  "body{padding:16px 0}.card{max-width:440px}"
+  "label{display:block;margin:10px 0 3px;font-size:.85rem;color:#b9c4d6}"
+  "select,input[type=text],input[type=number],input[type=password]{"
+  "width:100%;padding:9px;border:none;border-radius:6px;"
+  "background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}"
+  ".row{display:flex;gap:10px}.row>div{flex:1}"
+  "input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;"
+  "background:#e94560;color:#fff;cursor:pointer;margin-top:22px;font-weight:bold;font-size:1rem}"
+  ".link{text-align:center;margin-top:14px}.link a{color:#4ecca3;font-size:.85rem}"
+  ".rst{display:block;text-align:center;margin-top:10px;color:#e94560;font-size:.8rem}"
+  ".hint{font-size:.78rem;color:#9bd;line-height:1.4;margin:4px 0 0}"
+  "details{margin:12px 0 4px}"
+  "summary{color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px;"
+  "cursor:pointer;font-weight:bold;list-style:none}"
+  "summary::-webkit-details-marker{display:none}"
+  "summary::before{content:'\xE2\x96\xB8 ';font-size:.9rem}"
+  "details[open]>summary::before{content:'\xE2\x96\xBE '}";
+
+static const char OTA_CSS[] =
+  "label{display:block;margin:12px 0 4px;font-size:.9rem}"
+  "input[type=file]{width:100%;padding:10px;border:none;border-radius:6px;"
+  "background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}"
+  "input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;"
+  "background:#e94560;color:#fff;cursor:pointer;margin-top:16px;font-weight:bold;font-size:1rem}"
+  "input[type=submit]:disabled{background:#555;cursor:not-allowed}"
+  ".warn{color:#f0a500;font-size:.85rem;margin-top:8px;text-align:center}"
+  ".msg{text-align:center;color:#4ecca3;margin-top:12px;font-size:.9rem;min-height:1.2em}"
+  "a.btn{display:block;text-align:center;margin-top:14px;color:#4ecca3;font-size:.85rem}"
+  "progress{width:100%;height:16px;border-radius:8px;margin-top:14px;display:none}"
+  "progress::-webkit-progress-bar{background:#0f3460;border-radius:8px}"
+  "progress::-webkit-progress-value{background:#4ecca3;border-radius:8px}";
+
+// Build the shared <head> (meta + base style + page-specific style). Centralises
+// the boilerplate so a page body is just pageHead(title, css) + its markup.
+static String pageHead(const char* title, const char* extraCss) {
+    String h = R"rawhtml(<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DeskNexus Setup</title>
-<style>
-  body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-       display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-  .card{background:#16213e;border-radius:12px;padding:32px;max-width:400px;width:90%;box-shadow:0 4px 24px #0005}
-  h2{margin:0 0 24px;color:#e94560;text-align:center}
-  label{display:block;margin:12px 0 4px;font-size:.9rem}
-  select,input{width:100%;padding:10px;border:none;border-radius:6px;
-               background:#0f3460;color:#eee;font-size:1rem;box-sizing:border-box}
-  input[type=submit]{background:#e94560;cursor:pointer;margin-top:20px;font-weight:bold}
-  input[type=submit]:hover{background:#c73652}
-  .msg{text-align:center;color:#4ecca3;margin-top:16px;font-size:.9rem}
-  .pw-wrap{position:relative}
-  .pw-wrap input{padding-right:44px}
-  .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
-             background:none;border:none;color:#4ecca3;cursor:pointer;font-size:1.1rem;
-             padding:4px 6px;width:auto}
-  .refresh{display:inline-block;margin:6px 0;color:#4ecca3;font-size:.8rem;
-           cursor:pointer;text-decoration:underline;background:none;border:none}
-  #overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;
-           background:#1a1a2e;z-index:999;flex-direction:column;
-           justify-content:center;align-items:center}
-  .spinner{width:48px;height:48px;border:4px solid #0f3460;border-top-color:#e94560;
-           border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}
-  @keyframes spin{to{transform:rotate(360deg)}}
-</style>
+<title>)rawhtml";
+    h += title;
+    h += R"rawhtml(</title>
+<style>)rawhtml";
+    h += STYLE_BASE;
+    h += extraCss;
+    h += R"rawhtml(</style>
 </head>
-<body>
+)rawhtml";
+    return h;
+}
+
+static String portalPage() {
+    String html = pageHead("DeskNexus Setup", PORTAL_CSS);
+    html += R"rawhtml(<body>
 <div class="card">
   <h2>&#128338; DeskNexus Setup</h2>
   <form id="wifiForm" method="POST" action="/save">
@@ -350,11 +415,11 @@ static String portalPage() {
     html += wifiScanHTML();
     html += R"rawhtml(
     </select>
-    <button type="button" class="refresh" onclick="location.reload()">&#8635; Rescan networks</button>
+    <button type="button" class="refresh" aria-label="Rescan Wi-Fi networks" onclick="location.reload()">&#8635; Rescan networks</button>
     <label for="pass">Password</label>
     <div class="pw-wrap">
       <input type="password" id="pass" name="pass" placeholder="Wi-Fi password" autocomplete="current-password">
-      <button type="button" class="pw-toggle" onclick="var p=document.getElementById('pass');p.type=p.type==='password'?'text':'password'">&#128065;</button>
+      <button type="button" class="pw-toggle" aria-label="Show or hide password" onclick="var p=document.getElementById('pass');p.type=p.type==='password'?'text':'password'">&#128065;</button>
     </div>
     <input type="submit" value="Connect">
   </form>
@@ -402,28 +467,8 @@ static String statusPage() {
     char uptime[32];
     snprintf(uptime, sizeof(uptime), "%02uh %02um %02us", h, m, s);
 
-    String html = R"rawhtml(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DeskNexus Status</title>
-<style>
-  body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-       display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-  .card{background:#16213e;border-radius:12px;padding:32px;max-width:420px;width:90%;box-shadow:0 4px 24px #0005}
-  h2{margin:0 0 24px;color:#e94560;text-align:center}
-  table{width:100%;border-collapse:collapse}
-  td{padding:10px 8px;border-bottom:1px solid #0f3460;font-size:.95rem}
-  td:first-child{color:#4ecca3;font-weight:bold;width:40%}
-  .badge{display:inline-block;background:#4ecca3;color:#1a1a2e;border-radius:4px;padding:2px 8px;font-size:.8rem;font-weight:bold}
-  a.btn{display:block;text-align:center;margin-top:24px;padding:10px;
-        background:#e94560;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}
-  a.btn:hover{background:#c73652}
-</style>
-</head>
-<body>
+    String html = pageHead("DeskNexus Status", STATUS_CSS);
+    html += R"rawhtml(<body>
 <div class="card">
   <h2>&#128338; DeskNexus</h2>
   <table>
@@ -439,9 +484,9 @@ static String statusPage() {
     html += String(uptime);
     html += R"rawhtml(</td></tr>
   </table>
-  <a class="btn" href="/setup">&#9881; Wi-Fi Setup</a>
-  <a class="btn" href="/settings" style="background:#0f3460;margin-top:10px">&#9881; Settings</a>
-  <a class="btn" href="/update" style="background:#0f3460;margin-top:10px">&#128260; Firmware Update</a>
+  <a class="btn" href="/settings">&#9881; Settings</a>
+  <a class="btn" href="/setup" style="background:#0f3460;margin-top:10px">&#128246; Wi-Fi Setup</a>
+  <a class="btn-link" href="/update">&#128260; Firmware Update</a>
 </div>
 </body>
 </html>
@@ -453,40 +498,8 @@ static String statusPage() {
 // Settings page (STA mode only)
 // ---------------------------------------------------------------------------
 static String settingsPage() {
-    String html = R"rawhtml(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DeskNexus Settings</title>
-<style>
-  body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-       display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:16px 0}
-  .card{background:#16213e;border-radius:12px;padding:32px;max-width:440px;width:90%;box-shadow:0 4px 24px #0005}
-  h2{margin:0 0 24px;color:#e94560;text-align:center}
-  label{display:block;margin:10px 0 3px;font-size:.85rem;color:#b9c4d6}
-  select,input[type=text],input[type=number],input[type=password]{
-    width:100%;padding:9px;border:none;border-radius:6px;
-    background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}
-  .row{display:flex;gap:10px}
-  .row>div{flex:1}
-  input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;
-    background:#e94560;color:#fff;cursor:pointer;margin-top:22px;font-weight:bold;font-size:1rem}
-  input[type=submit]:hover{background:#c73652}
-  .link{text-align:center;margin-top:14px}
-  .link a{color:#4ecca3;font-size:.85rem}
-  .rst{display:block;text-align:center;margin-top:10px;color:#e94560;font-size:.8rem}
-  .hint{font-size:.78rem;color:#9bd;line-height:1.4;margin:4px 0 0}
-  details{margin:12px 0 4px}
-  summary{color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px;
-          cursor:pointer;font-weight:bold;list-style:none}
-  summary::-webkit-details-marker{display:none}
-  summary::before{content:'▸ ';font-size:.9rem}
-  details[open]>summary::before{content:'▾ '}
-</style>
-</head>
-<body>
+    String html = pageHead("DeskNexus Settings", SETTINGS_CSS);
+    html += R"rawhtml(<body>
 <div class="card">
   <h2>&#9881; DeskNexus Settings</h2>
   <form method="POST" action="/save-settings">
@@ -781,35 +794,8 @@ a{color:#4ecca3}</style>
 // OTA firmware update page
 // ---------------------------------------------------------------------------
 static String otaPage() {
-    String html = R"rawhtml(
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DeskNexus Firmware Update</title>
-<style>
-  body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-       display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-  .card{background:#16213e;border-radius:12px;padding:32px;max-width:420px;width:90%;box-shadow:0 4px 24px #0005}
-  h2{margin:0 0 24px;color:#e94560;text-align:center}
-  label{display:block;margin:12px 0 4px;font-size:.9rem}
-  input[type=file]{width:100%;padding:10px;border:none;border-radius:6px;
-                   background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}
-  input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;
-                     background:#e94560;color:#fff;cursor:pointer;margin-top:16px;
-                     font-weight:bold;font-size:1rem}
-  input[type=submit]:hover{background:#c73652}
-  input[type=submit]:disabled{background:#555;cursor:not-allowed}
-  .warn{color:#f0a500;font-size:.85rem;margin-top:8px;text-align:center}
-  .msg{text-align:center;color:#4ecca3;margin-top:12px;font-size:.9rem;min-height:1.2em}
-  a.btn{display:block;text-align:center;margin-top:14px;color:#4ecca3;font-size:.85rem}
-  progress{width:100%;height:16px;border-radius:8px;margin-top:14px;display:none}
-  progress::-webkit-progress-bar{background:#0f3460;border-radius:8px}
-  progress::-webkit-progress-value{background:#4ecca3;border-radius:8px}
-</style>
-</head>
-<body>
+    String html = pageHead("DeskNexus Firmware Update", OTA_CSS);
+    html += R"rawhtml(<body>
 <div class="card">
   <h2>&#128260; Firmware Update</h2>
   <form id="upForm" method="POST" enctype="multipart/form-data">
