@@ -10,13 +10,19 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 | Feature | Detail |
 |---------|--------|
 | **Clock** | Large HH:MM display with seconds; NTP-synced |
-| **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap |
-| **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown |
-| **Stocks** | Live quotes (price + % change) for up to 5 symbols via Alpha Vantage |
-| **Notifications** | On-screen banner when a stock moves ≥ 2 % or a prayer is ≤ 5 min away |
+| **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
+| **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
+| **Stocks** | Live quotes (price + % change) for up to 5 symbols via Yahoo Finance (no API key required) |
+| **Notifications** | On-screen banner when a stock moves ≥ 2 %, a prayer is approaching, or a break reminder is due |
+| **Break Reminder** | Configurable periodic reminder to take a break (default every 60 min) |
 | **WiFi** | Hybrid: connects to saved network; falls back to AP captive-portal if unavailable |
+| **Auto Location** | Automatically detects city and timezone from IP on boot |
+| **Setup Wizard** | First-boot QR-code setup flow for easy Wi-Fi configuration |
+| **OTA Updates** | Over-the-air firmware updates via ArduinoOTA push or browser HTTP upload |
+| **Auto-carousel** | Pages rotate automatically; pauses on manual touch |
 | **Auto-dim** | Backlight dims after configurable idle period |
 | **Touch nav** | Tap tabs at the bottom to switch between Prayer, Stocks, and Settings panels |
+| **Persistent Settings** | User configuration saved to NVS (ESP32 flash) and survives reboots |
 
 ---
 
@@ -48,15 +54,19 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 
 ```
 DeskNexus/
-├── platformio.ini  ← PlatformIO build configuration (board, libs, TFT pins)
+├── platformio.ini      ← PlatformIO build configuration (board, libs, TFT pins)
 └── src/
-    ├── main.cpp    ← Main sketch (setup / loop / state machine)
-    ├── config.h    ← User configuration (API keys, city, stocks, timezone)
-    ├── network.h   ← Hybrid WiFi manager (STA + AP captive portal)
-    ├── weather.h   ← OpenWeatherMap integration
-    ├── prayer.h    ← Aladhan prayer-times integration
-    ├── stocks.h    ← Alpha Vantage stock-quote integration
-    └── ui.h        ← TFT display layout & drawing helpers
+    ├── main.cpp        ← Main sketch (setup / loop / state machine)
+    ├── config.h        ← User configuration (API keys, city, stocks, timezone)
+    ├── settings.h      ← Runtime configuration persisted to NVS
+    ├── network.h       ← Hybrid WiFi manager (STA + AP captive portal)
+    ├── location_time.h ← Automatic city/timezone detection from IP
+    ├── time_sync.h     ← NTP time synchronisation helpers
+    ├── weather.h       ← OpenWeatherMap integration (current + forecast)
+    ├── prayer.h        ← Aladhan prayer-times integration
+    ├── stocks.h        ← Yahoo Finance stock-quote integration
+    ├── ota.h           ← Over-the-air firmware update (ArduinoOTA + HTTP)
+    └── ui.h            ← TFT display layout & drawing helpers
 ```
 
 ---
@@ -82,6 +92,7 @@ No manual library installation is needed.
 | TFT_eSPI | Bodmer | ^2.5 |
 | XPT2046_Touchscreen | Paul Stoffregen | ^1.4 |
 | ArduinoJson | Benoit Blanchon | ^6.21 |
+| QRCode | Richard Moore | ^0.0.1 |
 
 ### 3  TFT_eSPI is pre-configured
 
@@ -93,7 +104,7 @@ The CYD pin assignments and driver settings for TFT_eSPI are declared directly i
 Open `DeskNexus/src/config.h` and fill in:
 
 ```cpp
-// Timezone
+// Timezone (auto-detected on boot if AUTO_DETECT_LOCATION_TIME is true)
 #define NTP_UTC_OFFSET_SEC   10800   // e.g. 10800 = UTC+3
 
 // OpenWeatherMap
@@ -101,12 +112,10 @@ Open `DeskNexus/src/config.h` and fill in:
 #define OWM_CITY_NAME  "Riyadh"
 #define OWM_COUNTRY    "SA"
 
-// Alpha Vantage (stocks)
-#define AV_API_KEY     "your_key_here"
-
-// Stocks to monitor
+// Stocks to monitor (Yahoo Finance — no API key required)
+// Symbol format: TICKER.EXCHANGE  e.g. "IUSE.L", "IUSD.DE"
 static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
-    "AAPL", "GOOGL", "MSFT", "", "",
+    "IUSE.L", "IUSD.DE", "PPFB.DE", "", "",
 };
 
 // Prayer times
@@ -117,8 +126,8 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 
 **Free API keys:**
 - OpenWeatherMap: <https://openweathermap.org/api>
-- Alpha Vantage: <https://www.alphavantage.co/support/#api-key>
 - Aladhan: no key required
+- Yahoo Finance (stocks): no key required
 
 ### 5  Build & Flash
 
@@ -222,14 +231,21 @@ five printed values, and paste them into:
 
 | Goal | Where to change |
 |------|----------------|
-| Different city / country | `src/config.h` → `OWM_CITY_NAME`, `PRAYER_CITY` |
-| Different timezone | `src/config.h` → `NTP_UTC_OFFSET_SEC` |
+| Different city / country | `src/config.h` → `OWM_CITY_NAME`, `PRAYER_CITY` (or enable auto-detection) |
+| Different timezone | `src/config.h` → `NTP_UTC_OFFSET_SEC` (or enable auto-detection) |
+| Auto-detect location & timezone | `src/config.h` → `AUTO_DETECT_LOCATION_TIME` |
 | Different prayer method | `src/config.h` → `PRAYER_METHOD` |
-| Stock symbols | `src/config.h` → `STOCK_SYMBOLS[]` |
+| Prayer alert timing | `src/config.h` → `PRAYER_PRE_ALERT_MINUTES`, snooze settings |
+| Stock symbols | `src/config.h` → `STOCK_SYMBOLS[]` (Yahoo Finance format: TICKER.EXCHANGE) |
 | Stock alert threshold | `src/config.h` → `STOCK_ALERT_PCT` |
+| Stock refresh interval | `src/config.h` → `STOCK_REFRESH_MS` |
+| Break reminder interval | `src/config.h` → `BREAK_REMINDER_INTERVAL_M` |
 | Colour theme | `src/ui.h` → colour palette (`C_*` defines) |
 | Backlight timeout | `src/config.h` → `SCREEN_TIMEOUT_MS` |
+| Backlight brightness | `src/config.h` → `BACKLIGHT_FULL_DUTY` / `BACKLIGHT_DIM_DUTY` |
+| Auto-carousel timing | `src/config.h` → `CAROUSEL_INTERVAL_MS` |
 | Temperature units | `src/config.h` → `OWM_UNITS` (`"metric"` or `"imperial"`) |
+| OTA password | `src/config.h` → uncomment & set `OTA_PASSWORD` |
 
 ---
 
