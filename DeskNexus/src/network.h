@@ -71,6 +71,28 @@ static const char* getApPassword() {
     return apDerivedPassword;
 }
 
+// ---------------------------------------------------------------------------
+// HTTP Basic auth for sensitive routes (settings pages + OTA firmware upload).
+// Username is "admin"; the password is the same device password shown on the
+// AP setup screen — AP_PASSWORD from config.h if set, otherwise the MAC-derived
+// "deskXXXX". Reusing it keeps the web-admin and AP-join password in sync so
+// there is nothing extra for the user to remember.
+// ---------------------------------------------------------------------------
+static const char* WEB_ADMIN_USER = "admin";
+
+// True when the request carries valid credentials (does not send a response).
+static bool isAuthed() {
+    return server.authenticate(WEB_ADMIN_USER, getApPassword());
+}
+
+// Gate a handler: returns true if authorised, otherwise sends a 401 challenge
+// and returns false so the caller can bail out early.
+static bool requireAuth() {
+    if (isAuthed()) return true;
+    server.requestAuthentication(BASIC_AUTH, "DeskNexus");
+    return false;
+}
+
 struct SavedNetwork {
     char ssid[64];
     char password[64];
@@ -533,8 +555,15 @@ static String settingsPage() {
     <details open>
     <summary>Weather</summary>
     <label for="owmkey">OpenWeatherMap API Key</label>
-    <input type="password" id="owmkey" name="owmkey" maxlength="46" value=")rawhtml";
-    html += String(Settings::owmApiKey);
+    <input type="password" id="owmkey" name="owmkey" maxlength="46" value="" placeholder=")rawhtml";
+    {
+        // Never echo the stored key back to the browser. Show only whether one
+        // is set; a blank submit preserves the existing key (see handleSaveSettings).
+        bool hasOwmKey = strlen(Settings::owmApiKey) > 0 &&
+                         strcmp(Settings::owmApiKey, "YOUR_OPENWEATHERMAP_API_KEY") != 0;
+        html += hasOwmKey ? "Saved - leave blank to keep current key"
+                          : "Enter your API key";
+    }
     html += R"rawhtml(">
     <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank" style="color:#4ecca3">openweathermap.org/appid</a>. Weather is optional — clock, prayers and stocks work without it.</p>
     <div class="row">
@@ -790,6 +819,12 @@ static void handleOtaUpload() {
         _otaUpdateOk = false;
         _otaErrorMsg = "";
 
+        // Require valid admin credentials before accepting any firmware bytes.
+        if (!isAuthed()) {
+            Serial.println("[OTA] HTTP update rejected: authentication required.");
+            return;  // _otaCsrfOk stays false → no flash write, 401 sent by handleOtaComplete
+        }
+
         // CSRF token is passed as URL query parameter: /do-update?csrf=TOKEN
         // Use constant-time comparison to prevent timing side-channels.
         _otaCsrfOk = secureStrEqual(server.arg("csrf"), String(csrfToken));
@@ -830,6 +865,7 @@ static void handleOtaUpload() {
 // OTA completion handler — called after all upload data has been received
 // ---------------------------------------------------------------------------
 static void handleOtaComplete() {
+    if (!requireAuth()) return;
     if (!_otaCsrfOk) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
@@ -858,12 +894,14 @@ static void handleRoot() {
 }
 
 static void handleSettings() {
+    if (!requireAuth()) return;
     server.sendHeader("Cache-Control", "no-store, no-cache");
     server.sendHeader("Pragma", "no-cache");
     server.send(200, "text/html", settingsPage());
 }
 
 static void handleSaveSettings() {
+    if (!requireAuth()) return;
     if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
@@ -952,6 +990,7 @@ static void handleSaveSettings() {
 }
 
 static void handleResetSettings() {
+    if (!requireAuth()) return;
     if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
@@ -968,6 +1007,7 @@ static void handleSetup() {
 }
 
 static void handleForgetNetwork() {
+    if (!requireAuth()) return;
     if (!secureStrEqual(server.arg("csrf"), String(csrfToken))) {
         server.send(403, "text/plain", "Forbidden: invalid CSRF token.");
         return;
@@ -1037,6 +1077,7 @@ static void startServer() {
         server.on("/reset-settings", HTTP_GET,  handleResetSettings);
         server.on("/forget-network", HTTP_POST, handleForgetNetwork);
         server.on("/update",         HTTP_GET,  []() {
+            if (!requireAuth()) return;
             server.sendHeader("Cache-Control", "no-store, no-cache");
             server.sendHeader("Pragma", "no-cache");
             server.send(200, "text/html", otaPage());

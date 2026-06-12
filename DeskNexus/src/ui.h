@@ -126,7 +126,7 @@ static bool     needsRedraw = true;
 static bool     dimmed      = false;
 static bool     azanScreenActive = false;
 static int      azanPrayerIndex = -1;
-static unsigned long azanScreenExpiry = 0;
+static unsigned long azanScreenStart = 0;   // millis() when the azan screen was shown
 static int      prayerScrollOffset = 0;
 // Page transition animation state
 static int      transitionDir     = 0;  // -1=left, 0=none, 1=right
@@ -136,7 +136,8 @@ static int      transitionTarget  = -1;
 // Touch & carousel timing
 static unsigned long lastTouchMs        = 0;
 static unsigned long lastPageSwitch     = 0;
-static unsigned long carouselPausedUntil = 0;
+static unsigned long carouselPauseStart    = 0;  // millis() when the carousel was paused
+static unsigned long carouselPauseDuration = 0;  // 0 = not paused
 // Page dot pulse animation
 static unsigned long dotPulseStart      = 0;
 
@@ -338,7 +339,9 @@ static void advancePage() {
 
 static bool shouldAutoAdvance() {
     if (activePage == PAGE_HOME) return false;  // Home is the idle page, don't auto-advance
-    if (millis() < carouselPausedUntil) return false;
+    // Rollover-safe pause check (subtraction wraps correctly at the millis() overflow).
+    if (carouselPauseDuration > 0 &&
+        (millis() - carouselPauseStart) < carouselPauseDuration) return false;
     return (millis() - lastPageSwitch) >= CAROUSEL_INTERVAL_MS;
 }
 
@@ -358,11 +361,13 @@ static void returnToHome() {
 }
 
 static void pauseCarousel() {
-    carouselPausedUntil = millis() + CAROUSEL_PAUSE_MS;
+    carouselPauseStart    = millis();
+    carouselPauseDuration = CAROUSEL_PAUSE_MS;
 }
 
 static void pauseCarouselFor(unsigned long ms) {
-    carouselPausedUntil = millis() + ms;
+    carouselPauseStart    = millis();
+    carouselPauseDuration = ms;
 }
 
 static bool hasPrayerFooterActions() {
@@ -373,14 +378,14 @@ static void dismissAzanScreen() {
     if (!azanScreenActive) return;
     azanScreenActive = false;
     azanPrayerIndex = -1;
-    azanScreenExpiry = 0;
+    azanScreenStart = 0;
     needsRedraw = true;
 }
 
 static void showAzanScreen(int prayerIndex) {
     azanScreenActive = true;
     azanPrayerIndex = prayerIndex;
-    azanScreenExpiry = millis() + PRAYER_FULLSCREEN_MS;
+    azanScreenStart = millis();
     activePage = PAGE_PRAYER;
     wake();
     pauseCarousel();
@@ -388,7 +393,7 @@ static void showAzanScreen(int prayerIndex) {
 }
 
 static void updatePrayerUiState() {
-    if (azanScreenActive && millis() >= azanScreenExpiry) {
+    if (azanScreenActive && (millis() - azanScreenStart) >= PRAYER_FULLSCREEN_MS) {
         dismissAzanScreen();
     }
 
@@ -1464,8 +1469,9 @@ static void drawAzanScreen() {
     // Track (background)
     tft.fillRoundRect(barX, barY, barW, barH, 4, theme.separator);
     // Fill (proportional to time remaining)
-    if (azanScreenExpiry > 0 && millis() < azanScreenExpiry) {
-        float pct = (float)(azanScreenExpiry - millis()) / (float)PRAYER_FULLSCREEN_MS;
+    unsigned long azanElapsed = millis() - azanScreenStart;
+    if (azanScreenActive && azanElapsed < PRAYER_FULLSCREEN_MS) {
+        float pct = (float)(PRAYER_FULLSCREEN_MS - azanElapsed) / (float)PRAYER_FULLSCREEN_MS;
         if (pct > 1.0f) pct = 1.0f;
         int fillW = (int)(barW * pct);
         if (fillW > 0) {
@@ -1538,8 +1544,9 @@ static void updateAzanAnimation() {
     const int barX = 20, barW = SCREEN_W - 40, barH = 8;
     const int barY = cardY + cardH - 20;
     tft.fillRoundRect(barX, barY, barW, barH, 4, theme.separator);
-    if (azanScreenExpiry > 0 && millis() < azanScreenExpiry) {
-        float pct = (float)(azanScreenExpiry - millis()) / (float)PRAYER_FULLSCREEN_MS;
+    unsigned long azanElapsed = millis() - azanScreenStart;
+    if (azanScreenActive && azanElapsed < PRAYER_FULLSCREEN_MS) {
+        float pct = (float)(PRAYER_FULLSCREEN_MS - azanElapsed) / (float)PRAYER_FULLSCREEN_MS;
         if (pct > 1.0f) pct = 1.0f;
         int fillW = (int)(barW * pct);
         if (fillW > 0) {
@@ -1932,8 +1939,8 @@ static void updateBreakState() {
 // Notification banner (temporary overlay at top of panel)
 // Redesigned: taller (36px), slide-in animation, color-coded by event type
 // ---------------------------------------------------------------------------
-static unsigned long bannerExpiry = 0;
-static unsigned long bannerAnimStart = 0;
+static unsigned long bannerAnimStart = 0;   // also serves as the banner-start reference
+static unsigned long bannerDuration  = 0;    // 0 = no banner active
 static char bannerText[64] = {};
 static BannerStyle bannerStyle = BANNER_ACCENT;
 
@@ -1947,7 +1954,8 @@ static uint16_t bannerBgColor() {
 
 static void drawBannerIfActive() {
     if (azanScreenActive) return;
-    if (millis() >= bannerExpiry) return;
+    // Rollover-safe expiry check (subtraction wraps correctly at the millis() overflow).
+    if (bannerDuration == 0 || (millis() - bannerAnimStart) >= bannerDuration) return;
 
     uint16_t bg = bannerBgColor();
 
@@ -1996,8 +2004,9 @@ static void drawBannerIfActive() {
 static void showBanner(const char* text, uint32_t durationMs = BANNER_DEFAULT_MS,
                        BannerStyle style = BANNER_ACCENT) {
     strncpy(bannerText, text, sizeof(bannerText) - 1);
-    bannerExpiry = millis() + durationMs;
+    bannerText[sizeof(bannerText) - 1] = '\0';
     bannerAnimStart = millis();
+    bannerDuration  = durationMs;
     bannerStyle = style;
     drawBannerIfActive();  // paint immediately, no tick delay
 }
