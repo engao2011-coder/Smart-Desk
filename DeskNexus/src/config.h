@@ -26,9 +26,21 @@
 //   • ArduinoOTA — push via PlatformIO / Arduino IDE (UDP port 3232)
 //       pio run -e cyd-ota -t upload --upload-port desknexus.local
 //   • HTTP OTA   — browser upload at http://desknexus.local/update
-// Set a password to protect OTA. Leave undefined for password-free OTA.
+// Set a password to protect ArduinoOTA (UDP push). Leave undefined for
+// password-free ArduinoOTA.
 // ---------------------------------------------------------------------------
 // #define OTA_PASSWORD  "your_ota_password"
+
+// ---------------------------------------------------------------------------
+// Web admin authentication
+// The Settings page and the browser firmware-update page (/update) require
+// HTTP Basic auth. Log in with:
+//   username: admin
+//   password: the device password shown on the AP setup screen
+//             (AP_PASSWORD below if set, otherwise the derived "deskXXXX").
+// This protects against anyone on the LAN reading your API key or flashing
+// arbitrary firmware. The read-only status page (/) stays open.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // WiFi — Hybrid mode

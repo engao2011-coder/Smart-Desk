@@ -5,7 +5,7 @@
  *  • Real-time clock (NTP synced)
  *  • Current weather (OpenWeatherMap)
  *  • Daily prayer times (Aladhan API)
- *  • Stock price monitor (Alpha Vantage)
+ *  • Stock price monitor (Yahoo Finance)
  *  • Hybrid WiFi (STA first → AP captive-portal fallback)
  *  • Touch-based tab navigation
  *  • Auto-dim backlight

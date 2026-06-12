@@ -9,7 +9,7 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 
 | Feature | Detail |
 |---------|--------|
-| **Clock** | Large HH:MM display with seconds; NTP-synced |
+| **Clock** | Large HH:MM display; NTP-synced |
 | **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
 | **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
 | **Stocks** | Live quotes (price + % change) for up to 5 symbols via Yahoo Finance (no API key required) |
@@ -178,7 +178,7 @@ The `cyd-ota` environment is pre-configured in `platformio.ini` with
 
 1. Navigate to **http://desknexus.local** (or the device IP) on your
    browser.
-2. Click **Firmware Update**.
+2. Click **Firmware Update** and sign in (see *Web admin login* below).
 3. Choose the compiled `.bin` file
    (`DeskNexus/.pio/build/cyd/firmware.bin` after `pio run`).
 4. Click **Upload & Flash** — a progress bar shows transfer progress.
@@ -186,6 +186,20 @@ The `cyd-ota` environment is pre-configured in `platformio.ini` with
 
 The HTTP upload page is protected with a per-session CSRF token so it
 cannot be triggered by a cross-site request.
+
+### Web admin login
+
+The **Settings** and **Firmware Update** pages require HTTP Basic auth so
+that no one else on your network can read your API key or flash arbitrary
+firmware:
+
+- **Username:** `admin`
+- **Password:** the device password shown on the AP setup screen — your
+  `AP_PASSWORD` from `src/config.h` if set, otherwise the auto-derived
+  `deskXXXX` (last 4 hex digits of the device MAC).
+
+The read-only status page (`http://desknexus.local`) stays open and needs
+no login.
 
 ---
 
