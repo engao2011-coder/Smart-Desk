@@ -328,7 +328,12 @@ void setup() {
         }
 
         UI::showSplashStatus("Loading stocks..");
-        Stocks::fetchNext();
+        if (Settings::stockEuro) Stocks::fetchExchangeRates();
+        for (int i = 0; i < MAX_STOCKS; i++) {
+            if (strlen(Settings::stockSymbols[i]) > 0) Stocks::fetchOne(i);
+        }
+        Stocks::fetchIndex = 0;  // reset round-robin so loop starts from the beginning
+        lastStockFetch = millis();
 
         wizardActive = false;
     } else {
@@ -531,8 +536,9 @@ void loop() {
 
         // Stocks — one symbol per interval to respect rate limit
         int nStocks = Stocks::symbolCount();
+        unsigned long stockCycleMs = (unsigned long)Settings::stockRefreshMin * 60000UL;
         if (nStocks > 0 &&
-            (now - lastStockFetch) >= (STOCK_REFRESH_MS / (unsigned long)nStocks)) {
+            (now - lastStockFetch) >= (stockCycleMs / (unsigned long)nStocks)) {
             lastStockFetch = now;
             if (Stocks::fetchNext()) {
                 checkStockAlerts();

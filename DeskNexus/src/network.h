@@ -614,6 +614,11 @@ static String settingsPage() {
 
     <details>
     <summary>Stocks</summary>
+    <label for="stkRef">Refresh Interval (minutes)</label>
+    <input type="number" id="stkRef" name="stkRef" min="1" max="60" value=")rawhtml";
+    html += String(Settings::stockRefreshMin);
+    html += R"rawhtml(">
+    <p class="hint">How often to refresh stock prices. Default: 5 minutes. Range: 1–60 min.</p>
     <p class="hint">Yahoo Finance symbols. Leave empty to disable. Example: IUSE.L, AAPL, MSFT</p>
     <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
       <input type="checkbox" name="stkEur" value="1")rawhtml";
@@ -622,12 +627,7 @@ static String settingsPage() {
       Show prices in EUR (uses live USD/GBP&rarr;EUR exchange rate from Yahoo Finance)
     </label>
     <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>
-    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-      <input type="checkbox" name="stkPeak" value="1")rawhtml";
-    if (Settings::stockFromPeak) html += " checked";
-    html += R"rawhtml(>
-      Show change from 52-week high (peak) instead of daily change
-    </label>)rawhtml";
+    )rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
         html += "<label>Symbol " + String(i + 1) + "</label>";
@@ -913,10 +913,12 @@ static void handleSaveSettings() {
     if (brkInt >= BREAK_REMINDER_MIN_M && brkInt <= BREAK_REMINDER_MAX_M)
         Settings::breakReminderInterval = brkInt;
 
+    // Stocks — refresh interval
+    int stkRef = server.arg("stkRef").toInt();
+    if (stkRef >= 1 && stkRef <= 60) Settings::stockRefreshMin = stkRef;
+
     // Stocks — currency display
     Settings::stockEuro = server.hasArg("stkEur") && server.arg("stkEur") == "1";
-    // Stocks — from-peak display
-    Settings::stockFromPeak = server.hasArg("stkPeak") && server.arg("stkPeak") == "1";
 
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {

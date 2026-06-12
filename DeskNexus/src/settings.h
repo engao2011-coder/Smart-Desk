@@ -55,8 +55,8 @@ static int  breakReminderInterval = BREAK_REMINDER_INTERVAL_M;  // minutes
 // Stocks currency display — when true prices are converted to EUR
 static bool stockEuro = false;
 
-// Stocks from-peak display — when true show change from 52-week high instead of daily change
-static bool stockFromPeak = false;
+// Stock refresh interval in minutes (maps to STOCK_REFRESH_MS default)
+static int  stockRefreshMin = STOCK_REFRESH_MS / 60000;
 
 // Auto-detection metadata
 static bool autoDetectLastOk = false;
@@ -146,7 +146,7 @@ static void load() {
     breakReminderInterval = prefs.getInt("brkInt", breakReminderInterval);
 
     stockEuro = prefs.getBool("stkEur", stockEuro);
-    stockFromPeak = prefs.getBool("stkPeak", stockFromPeak);
+    stockRefreshMin = prefs.getInt("stkRef", stockRefreshMin);
 
     prefs.end();
     Serial.printf("[Settings] Loaded — city=%s  country=%s  method=%d  utc=%ld  cityManual=%d\n",
@@ -205,7 +205,7 @@ static void save() {
     prefs.putInt("brkInt", breakReminderInterval);
 
     prefs.putBool("stkEur", stockEuro);
-    prefs.putBool("stkPeak", stockFromPeak);
+    prefs.putInt("stkRef", stockRefreshMin);
 
     prefs.end();
     Serial.println("[Settings] Saved to NVS.");
@@ -259,7 +259,7 @@ static void resetToDefaults() {
     breakReminderInterval = BREAK_REMINDER_INTERVAL_M;
 
     stockEuro = false;
-    stockFromPeak = false;
+    stockRefreshMin = STOCK_REFRESH_MS / 60000;
 
     Serial.println("[Settings] Reset to compiled defaults.");
 }
