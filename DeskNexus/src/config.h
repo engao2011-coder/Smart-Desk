@@ -157,6 +157,8 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 #define STOCK_ALERT_PCT         2.0f   // 2 %
 // Intra-fetch change threshold — switch to stocks page when price moves by this % since last fetch
 #define STOCK_INTRA_CHANGE_PCT  1.0f   // 1 %
+// Summary "Stocks" card rotation — cycle through symbols this often on the Home page
+#define STOCK_SUMMARY_ROTATE_MS  5000   // 5 s per symbol
 
 // ---------------------------------------------------------------------------
 // Break Reminder

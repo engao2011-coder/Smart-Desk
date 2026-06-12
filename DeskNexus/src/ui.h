@@ -1126,6 +1126,85 @@ static void drawPrayerPanel() {
 // Home / Dashboard panel (y=124..319) — summary: current prayer + next prayer
 // + top-moving stock. Tap sections to drill into detail pages.
 // ---------------------------------------------------------------------------
+// Left/right touch-affordance chevrons on the Home card.
+static void drawHomeChevrons() {
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(2);
+    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print("<");
+    int rw = tft.textWidth(">");
+    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
+    tft.print(">");
+}
+
+// Geometry of the Home card's rotating Stocks section, recorded on each full
+// draw so updateHomeStockSection() can repaint just this region (no flicker).
+static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
+
+// Draw Section 3 of the Home card: the rotating stock quote (Stocks::displayIndex).
+static void drawHomeStockSection(int cardX, int cardW, int yPos) {
+    homeStockSecX = cardX; homeStockSecW = cardW; homeStockSecY = yPos;
+
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(cardX + 10, yPos);
+    tft.print("Stocks");
+    yPos += 12;
+
+    int topIdx = Stocks::displayQuoteIndex();
+
+    if (topIdx < 0) {
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 4);
+        tft.print("No data");
+    } else {
+        const Stocks::Quote& q = Stocks::quotes[topIdx];
+        float mPct = Stocks::metricPct(q);
+        uint16_t pctColor = (mPct >= 0) ? theme.green : theme.red;
+        uint16_t edgeColor = pctColor;
+
+        // Edge bar
+        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
+
+        // Symbol
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextColor(theme.textPri, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 16);
+        tft.print(q.symbol);
+
+        // % change (right, with arrow)
+        char pctBuf[16];
+        const char* arrow = (mPct >= 0) ? " +" : " ";
+        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, mPct);
+        tft.setTextColor(pctColor, theme.panel);
+        int pw = tft.textWidth(pctBuf);
+        tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
+        tft.print(pctBuf);
+
+        tft.setFreeFont(nullptr);
+        yPos += 20;
+
+        // Price below symbol
+        char priceBuf[16];
+        if (Settings::stockEuro) {
+            snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
+        } else {
+            snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+        }
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textSec, theme.panel);
+        tft.setCursor(cardX + 16, yPos + 2);
+        tft.print(priceBuf);
+
+        // Alert dot
+        if (q.alertTriggered) {
+            tft.fillCircle(cardX + cardW - 16, yPos + 4, 3, theme.gold);
+        }
+    }
+}
+
 static void drawHomePanel() {
     fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
     tft.setFreeFont(nullptr);
@@ -1300,75 +1379,26 @@ static void drawHomePanel() {
     tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
     yPos += 8;
 
-    // ── Section 3: Top Moving Stock ────────────────────────────────────────
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(cardX + 10, yPos);
-    tft.print("Top Stock");
-    yPos += 12;
+    // ── Section 3: Stocks (rotates through all symbols) ────────────────────
+    drawHomeStockSection(cardX, cardW, yPos);
 
-    int topIdx = Stocks::topMoverIndex();
-
-    if (topIdx < 0) {
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 4);
-        tft.print("No data");
-    } else {
-        const Stocks::Quote& q = Stocks::quotes[topIdx];
-        uint16_t pctColor = (q.changePct >= 0) ? theme.green : theme.red;
-        uint16_t edgeColor = pctColor;
-
-        // Edge bar
-        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
-
-        // Symbol
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textPri, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 16);
-        tft.print(q.symbol);
-
-        // % change (right, with arrow)
-        char pctBuf[16];
-        const char* arrow = (q.changePct >= 0) ? " +" : " ";
-        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, q.changePct);
-        tft.setTextColor(pctColor, theme.panel);
-        int pw = tft.textWidth(pctBuf);
-        tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
-        tft.print(pctBuf);
-
-        tft.setFreeFont(nullptr);
-        yPos += 20;
-
-        // Price below symbol
-        char priceBuf[16];
-        if (Settings::stockEuro) {
-            snprintf(priceBuf, sizeof(priceBuf), "E%.2f", Stocks::euroPrice(q));
-        } else {
-            snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
-        }
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textSec, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 2);
-        tft.print(priceBuf);
-
-        // Alert dot
-        if (q.alertTriggered) {
-            tft.fillCircle(cardX + cardW - 16, yPos + 4, 3, theme.gold);
-        }
-    }
-
-    // Touch affordance chevrons
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print("<");
-    int rw = tft.textWidth(">");
-    tft.setCursor(SCREEN_W - rw - 1, LAYOUT_PANEL_Y + LAYOUT_PANEL_H / 2 - 6);
-    tft.print(">");
+    drawHomeChevrons();
 
     // Reset text state
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+}
+
+// Repaint just the rotating Stocks section of the Home card. Called on the
+// rotation tick so the symbol cycles without redrawing (and flickering) the
+// whole panel. Falls back to nothing if Home isn't the active page.
+static void updateHomeStockSection() {
+    if (activePage != PAGE_HOME || azanScreenActive || homeStockSecY < 0) return;
+    // Clear the section's region (mid-card, clear of the rounded corners) and
+    // redraw it, then re-stamp the chevrons in case the clear overlapped them.
+    tft.fillRect(homeStockSecX + 2, homeStockSecY - 2, homeStockSecW - 4, 58, theme.panel);
+    drawHomeStockSection(homeStockSecX, homeStockSecW, homeStockSecY);
+    drawHomeChevrons();
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
@@ -1686,19 +1716,17 @@ static void drawStocksPanel() {
         order[orderCount++] = i;
     }
 
-    // Stable insertion sort: valid quotes first, then by |changeFromPeakPct| descending.
+    // Stable insertion sort: valid quotes first, then by |active metric| descending.
     for (int i = 1; i < orderCount; i++) {
         int key = order[i];
         const Stocks::Quote& kq = Stocks::quotes[key];
-        float keyVal = kq.changeFromPeakPct;
-        float keyAbs = keyVal >= 0 ? keyVal : -keyVal;
+        float keyAbs = fabsf(Stocks::metricPct(kq));
         float keyRank = kq.valid ? keyAbs : -1.0f;
         int j = i - 1;
 
         while (j >= 0) {
             const Stocks::Quote& jq = Stocks::quotes[order[j]];
-            float jVal = jq.changeFromPeakPct;
-            float jAbs = jVal >= 0 ? jVal : -jVal;
+            float jAbs = fabsf(Stocks::metricPct(jq));
             float jRank = jq.valid ? jAbs : -1.0f;
             if (jRank >= keyRank) break;
             order[j + 1] = order[j];
@@ -1718,23 +1746,36 @@ static void drawStocksPanel() {
         uint16_t edgeColor = theme.separator;
 
         if (q.valid) {
-            float peakPct = (q.fiftyTwoWeekHigh != 0.0f) ? q.changeFromPeakPct : q.changePct;
-            edgeColor = (peakPct >= 0) ? theme.green : theme.red;
+            edgeColor = (Stocks::metricPct(q) >= 0) ? theme.green : theme.red;
         }
 
         tft.fillRect(14, ry, SCREEN_W - 28, ROW_H - 2, rowBg);
         tft.fillRect(14, ry, 5, ROW_H - 2, edgeColor);
 
         if (!q.valid) {
+            bool badSym = Stocks::needsAttention(i);
             tft.setTextSize(2);
-            tft.setTextColor(theme.textDim, rowBg);
+            // Symbol in the alert colour when it needs fixing, dim otherwise.
+            tft.setTextColor(badSym ? theme.gold : theme.textDim, rowBg);
             tft.setCursor(26, ry + 8);
             tft.print(Settings::stockSymbols[i]);
-            tft.setCursor(154, ry + 8);
-            tft.print("...");
+
+            if (badSym) {
+                // Tell the user this symbol is the problem, not the network.
+                tft.setTextSize(1);
+                tft.setTextColor(theme.red, rowBg);
+                const char* msg = "CHECK SYMBOL";
+                int mw = tft.textWidth(msg);
+                tft.setCursor(SCREEN_W - mw - 24, ry + 12);
+                tft.print(msg);
+            } else {
+                tft.setTextColor(theme.textDim, rowBg);
+                tft.setCursor(154, ry + 8);
+                tft.print("...");
+            }
         } else {
-            // Use from-peak % if available, else fall back to daily change
-            float displayPct = (q.fiftyTwoWeekHigh != 0.0f) ? q.changeFromPeakPct : q.changePct;
+            // Active metric (daily or from-peak), per Settings::stockFromPeak
+            float displayPct = Stocks::metricPct(q);
             uint16_t pctColor = (displayPct >= 0) ? theme.green : theme.red;
 
             // Row 1: Symbol + Change % (size 2) — primary signal

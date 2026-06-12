@@ -549,6 +549,15 @@ void loop() {
         }
     }
 
+    // ── Summary "Stocks" card rotation — cycle through all symbols ─────────
+    static unsigned long lastStockRotate = 0;
+    if (Stocks::symbolCount() > 1 &&
+        (now - lastStockRotate) >= STOCK_SUMMARY_ROTATE_MS) {
+        lastStockRotate = now;
+        Stocks::nextDisplay();
+        UI::updateHomeStockSection();  // repaint just the stock card (no flicker)
+    }
+
     // ── Prayer reminder + carousel + azan-expiry (every 30 s) ─────────────
     static unsigned long lastPrayerAlert = 0;
     if ((now - lastPrayerAlert) >= 30000) {
