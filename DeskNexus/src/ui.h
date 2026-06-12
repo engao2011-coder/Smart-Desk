@@ -1683,13 +1683,15 @@ static void drawStocksPanel() {
     for (int i = 1; i < orderCount; i++) {
         int key = order[i];
         const Stocks::Quote& kq = Stocks::quotes[key];
-        float keyAbs = kq.changePct >= 0 ? kq.changePct : -kq.changePct;
+        float keyVal = Settings::stockFromPeak ? kq.changeFromPeakPct : kq.changePct;
+        float keyAbs = keyVal >= 0 ? keyVal : -keyVal;
         float keyRank = kq.valid ? keyAbs : -1.0f;
         int j = i - 1;
 
         while (j >= 0) {
             const Stocks::Quote& jq = Stocks::quotes[order[j]];
-            float jAbs = jq.changePct >= 0 ? jq.changePct : -jq.changePct;
+            float jVal = Settings::stockFromPeak ? jq.changeFromPeakPct : jq.changePct;
+            float jAbs = jVal >= 0 ? jVal : -jVal;
             float jRank = jq.valid ? jAbs : -1.0f;
             if (jRank >= keyRank) break;
             order[j + 1] = order[j];
@@ -1709,7 +1711,11 @@ static void drawStocksPanel() {
         uint16_t edgeColor = theme.separator;
 
         if (q.valid) {
-            edgeColor = (q.changePct >= 0) ? theme.green : theme.red;
+            if (Settings::stockFromPeak && q.fiftyTwoWeekHigh != 0.0f) {
+                edgeColor = (q.changeFromPeakPct >= 0) ? theme.green : theme.red;
+            } else {
+                edgeColor = (q.changePct >= 0) ? theme.green : theme.red;
+            }
         }
 
         tft.fillRect(14, ry, SCREEN_W - 28, ROW_H - 2, rowBg);
@@ -1736,7 +1742,12 @@ static void drawStocksPanel() {
             }
 
             char pctBuf[12];
-            snprintf(pctBuf, sizeof(pctBuf), "%+.2f%%", q.changePct);
+            if (Settings::stockFromPeak && q.fiftyTwoWeekHigh != 0.0f) {
+                snprintf(pctBuf, sizeof(pctBuf), "%+.2f%%", q.changeFromPeakPct);
+                pctColor = (q.changeFromPeakPct >= 0) ? theme.green : theme.red;
+            } else {
+                snprintf(pctBuf, sizeof(pctBuf), "%+.2f%%", q.changePct);
+            }
             tft.setTextColor(pctColor, rowBg);
             int pctW = tft.textWidth(pctBuf);
             tft.setCursor(SCREEN_W - pctW - 24, ry + 2);
