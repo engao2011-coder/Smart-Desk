@@ -367,6 +367,22 @@ static void nextDisplay() {
 }
 
 // ---------------------------------------------------------------------------
+// Index of the quote currently selected for the rotating summary card.
+// Returns a valid index (snapping forward if the current slot isn't valid),
+// or -1 when no quote is valid yet.
+// ---------------------------------------------------------------------------
+static int displayQuoteIndex() {
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        int idx = (displayIndex + i) % MAX_STOCKS;
+        if (quotes[idx].valid) {
+            displayIndex = idx;
+            return idx;
+        }
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
 // True when a configured symbol has failed to fetch in a way the user should
 // fix (not found / delisted, or repeatedly failing). Drives the "check symbol"
 // hint on-screen and in the web UI.
@@ -393,25 +409,6 @@ static bool hasAlert() {
         if (quotes[i].valid && quotes[i].alertTriggered) return true;
     }
     return false;
-}
-
-// ---------------------------------------------------------------------------
-// Return the index of the quote with the largest move by the active metric
-// (daily change or from-peak, per Settings::stockFromPeak). Returns -1 if no
-// valid quotes exist.
-// ---------------------------------------------------------------------------
-static int topMoverIndex() {
-    int best = -1;
-    float bestAbs = -1.0f;
-    for (int i = 0; i < MAX_STOCKS; i++) {
-        if (!quotes[i].valid) continue;
-        float a = fabsf(metricPct(quotes[i]));
-        if (a > bestAbs) {
-            bestAbs = a;
-            best = i;
-        }
-    }
-    return best;
 }
 
 // ---------------------------------------------------------------------------
