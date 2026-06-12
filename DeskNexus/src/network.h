@@ -343,8 +343,7 @@ static String portalPage() {
   <form id="wifiForm" method="POST" action="/save">
     <input type="hidden" name="csrf" value=")rawhtml";
     html += String(csrfToken);
-    html += R"rawhtml(">";
-    html += R"rawhtml(
+    html += R"rawhtml(">
     <label for="ssid">Wi-Fi Network</label>
     <select name="ssid" id="ssid">
 )rawhtml";
@@ -354,7 +353,7 @@ static String portalPage() {
     <button type="button" class="refresh" onclick="location.reload()">&#8635; Rescan networks</button>
     <label for="pass">Password</label>
     <div class="pw-wrap">
-      <input type="password" id="pass" name="pass" placeholder="Wi-Fi password">
+      <input type="password" id="pass" name="pass" placeholder="Wi-Fi password" autocomplete="current-password">
       <button type="button" class="pw-toggle" onclick="var p=document.getElementById('pass');p.type=p.type==='password'?'text':'password'">&#128065;</button>
     </div>
     <input type="submit" value="Connect">
@@ -430,7 +429,7 @@ static String statusPage() {
   <table>
     <tr><td>Status</td><td><span class="badge">Online</span></td></tr>
     <tr><td>Network</td><td>)rawhtml";
-    html += ssid;
+    html += htmlEscape(ssid);
     html += R"rawhtml(</td></tr>
     <tr><td>IP Address</td><td>)rawhtml";
     html += ip;
@@ -466,7 +465,7 @@ static String settingsPage() {
        display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:16px 0}
   .card{background:#16213e;border-radius:12px;padding:32px;max-width:440px;width:90%;box-shadow:0 4px 24px #0005}
   h2{margin:0 0 24px;color:#e94560;text-align:center}
-  label{display:block;margin:10px 0 3px;font-size:.85rem;color:#c618}
+  label{display:block;margin:10px 0 3px;font-size:.85rem;color:#b9c4d6}
   select,input[type=text],input[type=number],input[type=password]{
     width:100%;padding:9px;border:none;border-radius:6px;
     background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}
@@ -500,14 +499,14 @@ static String settingsPage() {
     <div class="row">
       <div>
         <label for="city">City</label>
-        <input type="text" id="city" name="city" maxlength="60" value=")rawhtml";
-    html += String(Settings::city);
+        <input type="text" id="city" name="city" maxlength="60" autocomplete="off" spellcheck="false" value=")rawhtml";
+    html += htmlEscape(String(Settings::city));
     html += R"rawhtml(">
       </div>
       <div>
         <label for="country">Country (ISO)</label>
-        <input type="text" id="country" name="country" maxlength="4" value=")rawhtml";
-    html += String(Settings::country);
+        <input type="text" id="country" name="country" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" value=")rawhtml";
+    html += htmlEscape(String(Settings::country));
     html += R"rawhtml(">
       </div>
     </div>
@@ -553,7 +552,7 @@ static String settingsPage() {
     html += R"rawhtml(    </select>
         <p class="hint">
             Auto-detect: )rawhtml";
-        html += String(Settings::autoDetectStatus);
+        html += htmlEscape(String(Settings::autoDetectStatus));
         html += " (";
         html += Settings::autoDetectLastOk ? "OK" : "Failed";
         html += R"rawhtml()
@@ -685,7 +684,8 @@ static String settingsPage() {
         }
         html += "</label>";
         html += "<input type=\"text\" name=\"stk" + String(i) +
-                "\" maxlength=\"23\" value=\"" + String(Settings::stockSymbols[i]) +
+                "\" maxlength=\"23\" autocapitalize=\"characters\" autocomplete=\"off\" spellcheck=\"false\" value=\"" +
+                htmlEscape(String(Settings::stockSymbols[i])) +
                 "\" placeholder=\"e.g. IUSE.L\" style=\"text-transform:uppercase\">";
     }
 
