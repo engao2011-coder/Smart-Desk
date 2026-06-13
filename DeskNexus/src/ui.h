@@ -1153,6 +1153,37 @@ static void drawTapHint(int cardX, int cardW, int y) {
 // draw so updateHomeStockSection() can repaint just this region (no flicker).
 static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
 
+// ---------------------------------------------------------------------------
+// Copy `src` into `out`, dropping trailing characters and appending an
+// ellipsis until the text fits within `maxW` pixels at the CURRENT font/size.
+// Leaves the text untouched when it already fits. Used to keep long stock
+// names on a single line.
+// ---------------------------------------------------------------------------
+static void fitTextToWidth(const char* src, int maxW, char* out, size_t outSz) {
+    if (outSz == 0) return;
+    if (tft.textWidth(src) <= maxW) {
+        strncpy(out, src, outSz - 1);
+        out[outSz - 1] = '\0';
+        return;
+    }
+    static const char ell[] = "..";
+    int ellW = tft.textWidth(ell);
+    size_t n = strlen(src);
+    while (n > 0) {
+        char tmp[48];
+        size_t cn = (n < sizeof(tmp)) ? n : sizeof(tmp) - 1;
+        memcpy(tmp, src, cn);
+        tmp[cn] = '\0';
+        if (tft.textWidth(tmp) + ellW <= maxW) {
+            snprintf(out, outSz, "%s%s", tmp, ell);
+            return;
+        }
+        n = cn - 1;
+    }
+    strncpy(out, ell, outSz - 1);
+    out[outSz - 1] = '\0';
+}
+
 // Draw Section 3 of the Home card: the rotating stock quote (Stocks::displayIndex).
 static void drawHomeStockSection(int cardX, int cardW, int yPos) {
     homeStockSecX = cardX; homeStockSecW = cardW; homeStockSecY = yPos;
@@ -1180,19 +1211,38 @@ static void drawHomeStockSection(int cardX, int cardW, int yPos) {
         // Edge bar
         tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
 
-        // Symbol
+        // % change (right, with arrow) — measured first so the name knows its
+        // available width.
         tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textPri, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 16);
-        tft.print(q.symbol);
-
-        // % change (right, with arrow)
         char pctBuf[16];
         const char* arrow = (mPct >= 0) ? " +" : " ";
         snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, mPct);
+        int pw   = tft.textWidth(pctBuf);
+        int pctX = cardX + cardW - pw - 14;
+
+        // Name (left) — shrink to the small built-in font, then truncate, when
+        // the bold name would collide with the % change.
+        const char* nm       = Stocks::displayName(q);
+        int         nameX    = cardX + 16;
+        int         nameMaxW = pctX - nameX - 8;
+        char        nameBuf[44];
+        tft.setTextColor(theme.textPri, theme.panel);
+        if (tft.textWidth(nm) <= nameMaxW) {
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setCursor(nameX, yPos + 16);
+            tft.print(nameBuf);
+        } else {
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setCursor(nameX, yPos + 10);
+            tft.print(nameBuf);
+            tft.setFreeFont(&FreeSansBold9pt7b);
+        }
+
+        // % change
         tft.setTextColor(pctColor, theme.panel);
-        int pw = tft.textWidth(pctBuf);
-        tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
+        tft.setCursor(pctX, yPos + 16);
         tft.print(pctBuf);
 
         tft.setFreeFont(nullptr);
@@ -1786,21 +1836,33 @@ static void drawStocksPanel() {
             float displayPct = Stocks::metricPct(q);
             uint16_t pctColor = (displayPct >= 0) ? theme.green : theme.red;
 
-            // Row 1: Symbol + Change % (size 2) — primary signal
-            tft.setTextSize(2);
-            tft.setTextColor(theme.textPri, rowBg);
-            tft.setCursor(26, ry + 2);
-            if (strlen(q.symbol) > 0) {
-                tft.print(q.symbol);
-            } else {
-                tft.print(Settings::stockSymbols[i]);
-            }
-
+            // Row 1: Name + Change % — primary signal. The % is measured first
+            // (at its size-2 width) so the name gets the remaining row width.
             char pctBuf[12];
             snprintf(pctBuf, sizeof(pctBuf), "%+.2f%%", displayPct);
-            tft.setTextColor(pctColor, rowBg);
+            tft.setTextSize(2);
             int pctW = tft.textWidth(pctBuf);
-            tft.setCursor(SCREEN_W - pctW - 24, ry + 2);
+            int pctX = SCREEN_W - pctW - 24;
+
+            // Name: prefer size 2; shrink to size 1, then truncate, if too wide.
+            const char* nm       = Stocks::displayName(q);
+            int         nameX    = 26;
+            int         nameMaxW = pctX - nameX - 8;
+            char        nameBuf[44];
+            int         nameY    = ry + 2;
+            tft.setTextSize(2);
+            if (tft.textWidth(nm) > nameMaxW) {
+                tft.setTextSize(1);   // shrink before resorting to truncation
+                nameY = ry + 6;
+            }
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setTextColor(theme.textPri, rowBg);
+            tft.setCursor(nameX, nameY);
+            tft.print(nameBuf);
+
+            tft.setTextSize(2);
+            tft.setTextColor(pctColor, rowBg);
+            tft.setCursor(pctX, ry + 2);
             tft.print(pctBuf);
 
             // Row 2: Price under the symbol — secondary context.

@@ -694,6 +694,11 @@ static String settingsPage() {
             else if (Stocks::quotes[i].valid) { txt = "&#10003; ok";                              col = "#4ecca3"; }
             else                              { txt = "&hellip; loading";                         col = "#9aa0a6"; }
             html += " <span style=\"font-size:.78rem;font-weight:600;color:" + String(col) + "\">" + txt + "</span>";
+            // Show the resolved company/fund name once it has been fetched.
+            if (Stocks::quotes[i].name[0]) {
+                html += " <span style=\"font-size:.78rem;color:#9aa0a6\">&middot; " +
+                        htmlEscape(String(Stocks::quotes[i].name)) + "</span>";
+            }
         }
         html += "</label>";
         html += "<input type=\"text\" name=\"stk" + String(i) +
