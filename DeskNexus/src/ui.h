@@ -67,17 +67,17 @@ static const Theme THEME_DARK = {
 };
 
 static const Theme THEME_LIGHT = {
-    0xE71A,  // bg         — warm beige canvas (clearly distinct from white cards)
+    0xEF5C,  // bg         — clean warm off-white canvas (de-muddied vs old beige)
     0xFFFF,  // panel      — pure white (strong card elevation vs bg)
-    0xD240,  // accent     — burnt orange
-    0x18C3,  // textPri    — deep slate
-    0x4A49,  // textSec    — strong mid grey
-    0x738E,  // textDim    — medium grey (~4.8:1 on white, meets WCAG AA)
-    0x1A86,  // green      — readable green
-    0xD104,  // red        — readable red
-    0xBC40,  // gold       — warm amber
-    0xA534,  // separator  — neutral mid-grey (visible on both bg and panel)
-    0xFE48,  // highlightBg — warm cream
+    0xDB42,  // accent     — refined amber-orange (cleaner than brick)
+    0x1905,  // textPri    — ink slate (16:1 on white)
+    0x42AD,  // textSec    — slate-600 (~7.6:1 on white)
+    0x6BD1,  // textDim    — slate-500 (~4.4:1 on white, meets WCAG AA)
+    0x1408,  // green      — lively emerald (readable up/prayed)
+    0xC965,  // red        — clean red
+    0xB3E1,  // gold       — deep warm amber
+    0xC617,  // separator  — warm hairline (visible on both bg and panel)
+    0xFF9A,  // highlightBg — soft pale amber (calm next-prayer tint)
 };
 
 // ---------------------------------------------------------------------------
