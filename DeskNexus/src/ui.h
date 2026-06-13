@@ -9,8 +9,8 @@
  *  ┌────────────────────────┐ y=0
  *  │  Status bar  (24 px)   │  WiFi dot · date · ■ ● ○ ○ page dots
  *  ├────────────────────────┤ y=24
- *  │  Hero       (100 px)   │  HH:MM (left) │ icon+temp (right)
- *  │                        │  countdown / status below clock
+ *  │  Hero       (100 px)   │  HH:MM + weekday (left) │ weather (right)
+ *  │                        │  icon · temp · condition · humidity · city
  *  ├────────────────────────┤ y=124
  *  │                        │
  *  │  Panel      (196 px)   │  Home (0), Prayer (1), Forecast (2), Stocks (3)

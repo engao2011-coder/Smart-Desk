@@ -12,16 +12,16 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 | **Clock** | Large HH:MM display; NTP-synced |
 | **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
 | **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
-| **Stocks** | Live quotes (price + % change) for up to 5 symbols via Yahoo Finance (no API key required) |
+| **Stocks** | Live quotes for up to 5 symbols via Yahoo Finance (no API key required); shows the company/fund name with both the daily (1D) and 52-week (52W) change |
 | **Notifications** | On-screen banner when a stock moves ≥ 2 %, a prayer is approaching, or a break reminder is due |
 | **Break Reminder** | Configurable periodic reminder to take a break (default every 60 min) |
 | **WiFi** | Hybrid: connects to saved network; falls back to AP captive-portal if unavailable |
 | **Auto Location** | Automatically detects city and timezone from IP on boot |
 | **Setup Wizard** | First-boot QR-code setup flow for easy Wi-Fi configuration |
 | **OTA Updates** | Over-the-air firmware updates via ArduinoOTA push or browser HTTP upload |
-| **Auto-carousel** | Pages rotate automatically; pauses on manual touch |
+| **Auto-carousel** | Detail pages (Prayer, Forecast, Stocks) rotate automatically; pauses on manual touch and returns to the Home page after idle |
 | **Auto-dim** | Backlight dims after configurable idle period |
-| **Touch nav** | Tap tabs at the bottom to switch between Prayer, Stocks, and Settings panels |
+| **Touch nav** | Tap the right/left half of the panel for next/previous page; on the Home page tap the prayer or stock region to drill into its detail page. Settings are configured from the web portal, not the display |
 | **Persistent Settings** | User configuration saved to NVS (ESP32 flash) and survives reboots |
 
 ---
@@ -205,27 +205,34 @@ no login.
 
 ## Screen Layout (Portrait 240 × 320)
 
+The display is split into three horizontal zones. The status bar and hero are
+always visible; the bottom panel swaps between pages.
+
 ```
-┌──────────────────────────┐  ← Status bar: WiFi indicator + date
-│  ● Mon 10 Mar 2025        │
-├──────────────────────────┤
-│                          │
-│       14:35              │  ← Clock (large) + seconds
-│                       47 │
-│                          │
-├──────────────────────────┤
-│ Riyadh        Hum: 28%  │  ← Weather
-│ 31°C          Wind: 4.2  │
-│ Sunny         Feels: 33° │
-├──────────────────────────┤
-│  Prayer  │ Stocks │ Sett │  ← Tab bar
-├──────────────────────────┤
-│ Fajr   05:10  Asr  15:42 │  ← Panel (Prayer / Stocks / Settings)
-│ Sunrise 06:30  Maghrib 18:15│
-│ Dhuhr  12:10  Isha  19:45│
-│         Next in 0h 22m   │
-└──────────────────────────┘
+┌────────────────────────────┐ y=0
+│ ● Fri 13 Jun    ■ ● ○ ○     │ ← Status bar (24 px): WiFi dot · date · page dots
+├────────────────────────────┤ y=24
+│   14:35       ☀  31°C       │ ← Hero (100 px): clock + weekday (left)
+│   ─────       Sunny         │   weather icon · temp · condition ·
+│   Friday      Hum 28%  city │   humidity · city (right)
+├────────────────────────────┤ y=124
+│                            │
+│   Panel  (196 px)           │ ← One of: Home · Prayer · Forecast · Stocks
+│                            │
+└────────────────────────────┘ y=320
 ```
+
+**Pages** (selected via auto-carousel or touch):
+
+- **Home** — idle landing page; compact prayer timeline + a rotating stock card.
+- **Prayer** — full prayer list with the next prayer highlighted and a fused
+  countdown/progress chip.
+- **Forecast** — 5-day weather outlook.
+- **Stocks** — per-symbol detail with name, daily (1D) and 52-week (52W) change.
+
+Detail pages auto-rotate; the carousel pauses on touch and the display returns
+to **Home** after an idle period. **Settings** are not shown on the display —
+they are configured from the web portal (see *Web admin login* above).
 
 ---
 
