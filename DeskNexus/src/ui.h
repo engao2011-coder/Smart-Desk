@@ -145,6 +145,11 @@ static unsigned long dotPulseStart      = 0;
 static bool homePrayedButtonVisible = false;
 static int  homePrayedButtonY = 0;
 
+// Home card Stocks-section geometry (set by drawHomeStockSection, read by
+// handleTouch + updateHomeStockSection). Declared early so the touch handler
+// can use the section top as the prayer/stocks tap boundary.
+static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
+
 // Break reminder state
 static unsigned long breakLastNotify    = 0;     // millis() of last break notification
 static bool          breakScreenActive  = false;  // full-screen break reminder showing
@@ -510,10 +515,12 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
                 return true;
             }
         }
-        // Separator is at roughly cardY + 6 + 12 + 30 + (prayed btn ~26) + 8 = ~82px from cardY
-        // Prayer section occupies top ~55% of panel, stock section bottom ~35%
-        int panelMid = LAYOUT_PANEL_Y + (LAYOUT_PANEL_H * 2 / 3);
-        if ((int)ty < panelMid) {
+        // Prayer timeline occupies the top of the card, the stocks section the
+        // bottom. Use the recorded stocks-section top as the split so the zones
+        // always match what was drawn (falls back to ~2/3 before first draw).
+        int stockTop = (homeStockSecY > 0) ? homeStockSecY - 4
+                                           : LAYOUT_PANEL_Y + (LAYOUT_PANEL_H * 2 / 3);
+        if ((int)ty < stockTop) {
             // Tap prayer area → drill to full prayer list
             playPanelTransition(1);
             dotPulseStart = millis();
@@ -1149,9 +1156,9 @@ static void drawTapHint(int cardX, int cardW, int y) {
     tft.setTextColor(theme.textDim, theme.panel);
 }
 
-// Geometry of the Home card's rotating Stocks section, recorded on each full
-// draw so updateHomeStockSection() can repaint just this region (no flicker).
-static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
+// Geometry of the Home card's rotating Stocks section is recorded on each full
+// draw (see homeStockSec* above) so updateHomeStockSection() can repaint just
+// this region without flicker.
 
 // ---------------------------------------------------------------------------
 // Copy `src` into `out`, dropping trailing characters and appending an
@@ -1309,76 +1316,216 @@ static void drawHomePanel() {
 
     int yPos = cardY + 6;
 
-    // ── Section 1: Current Prayer ──────────────────────────────────────────
-    // The prayer region (top ~2/3 of the card) drills into the full prayer
-    // list on tap; the "tap >" hint on this header advertises that.
+    // 3-letter prayer abbreviations for the compact day strip.
+    auto prayerAbbrev = [](int idx) -> const char* {
+        switch (idx) {
+            case 0: return "Fjr";
+            case 1: return "Sun";
+            case 2: return "Dhr";
+            case 3: return "Asr";
+            case 4: return "Mgb";
+            case 5: return "Ish";
+            default: return "---";
+        }
+    };
+
+    // ── Section 1: Today's prayer timeline ─────────────────────────────────
+    // A horizontal strip of all six daily prayers (state-coloured dots + times),
+    // a Fajr→Isha day-progress bar, and a prayed/missed summary. Tapping this
+    // region drills into the full prayer list. The next-prayer countdown lives
+    // only in the hero, so it isn't repeated here.
     tft.setTextSize(1);
     tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(cardX + 10, yPos);
-    tft.print("Current Prayer");
+    tft.print("Today's prayers");
     drawTapHint(cardX, cardW, yPos);
-    yPos += 12;
+    yPos += 14;
 
-    int curIdx = Prayer::currentOrLastPrayerIndex();
+    const int nextIdx = Prayer::current.valid ? Prayer::current.nextIndex : -1;
 
-    if (!Prayer::current.valid || curIdx < 0) {
+    if (!Prayer::current.valid) {
         tft.setTextSize(2);
         tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(cardX + 10, yPos + 4);
+        tft.setCursor(cardX + 10, yPos + 6);
         tft.print("Loading...");
-        yPos += 30;
+        yPos += 34;
     } else {
-        Prayer::RowState curState = Prayer::rowStateForIndex(curIdx);
-        const char* pName = Prayer::current.prayers[curIdx].name;
-        const char* pTime = Prayer::current.prayers[curIdx].time;
+        // Show the five daily prayers; Sunrise (index 1) is omitted so each
+        // remaining prayer gets a wider column.
+        static const int dispIdx[5] = {0, 2, 3, 4, 5};
+        const int DISP_COUNT = 5;
+        // If the next event is Sunrise, emphasise the following prayer (Dhuhr)
+        // instead so the strip/countdown always points at a real prayer.
+        const int highlightIdx = (nextIdx == 1) ? 2 : nextIdx;
 
-        // Left edge bar (color signals state)
-        uint16_t edgeColor = theme.separator;
-        switch (curState) {
-            case Prayer::ROW_DONE:    edgeColor = theme.green;  break;
-            case Prayer::ROW_PENDING: edgeColor = theme.accent; break;
-            case Prayer::ROW_SNOOZED: edgeColor = theme.textSec; break;
-            case Prayer::ROW_MISSED:  edgeColor = theme.red;    break;
-            default:                  edgeColor = theme.gold;    break;
-        }
-        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
+        const int stripX = cardX + 6;
+        const int stripW = cardW - 12;
+        const int colW   = stripW / DISP_COUNT;
+        const int stripY = yPos;
 
-        // Prayer name (large)
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textPri, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 16);
-        tft.print(pName);
+        for (int d = 0; d < DISP_COUNT; d++) {
+            int i = dispIdx[d];
+            Prayer::RowState st = Prayer::rowStateForIndex(i);
+            int colX = stripX + d * colW;
+            int cx   = colX + colW / 2;
+            bool isNext = (i == highlightIdx);
 
-        // Status indicator after name
-        int nameW = tft.textWidth(pName);
-        tft.setFreeFont(nullptr);
-        if (curState == Prayer::ROW_DONE) {
-            drawCheckmark(cardX + 16 + nameW + 4, yPos + 6, theme.green);
+            // Highlight the next prayer's column so it pops out of the row.
+            uint16_t colBg = theme.panel;
+            if (isNext) {
+                tft.fillRoundRect(colX + 1, stripY - 2, colW - 2, 32, 4, theme.highlightBg);
+                colBg = theme.highlightBg;
+            }
+
+            uint16_t labelCol = isNext ? theme.gold : theme.textDim;
+            uint16_t timeCol  = isNext ? theme.gold : theme.textSec;
+
+            // Abbreviated name (top of column)
             tft.setTextSize(1);
-            tft.setTextColor(theme.green, theme.panel);
-            tft.setCursor(cardX + 16 + nameW + 18, yPos + 8);
-            tft.print("Prayed");
-        } else if (curState == Prayer::ROW_PENDING) {
-            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "DUE", theme.red, theme.textPri);
-        } else if (curState == Prayer::ROW_SNOOZED) {
-            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "SNZD", theme.textDim, theme.textPri);
-        } else if (curState == Prayer::ROW_MISSED) {
-            drawPillBadge(cardX + 16 + nameW + 6, yPos + 5, "MISS", theme.red, theme.textPri);
+            tft.setTextColor(labelCol, colBg);
+            const char* ab = prayerAbbrev(i);
+            int aw = tft.textWidth(ab);
+            tft.setCursor(cx - aw / 2, stripY);
+            tft.print(ab);
+
+            // State marker dot (middle of column)
+            int dotY = stripY + 14;
+            switch (st) {
+                case Prayer::ROW_DONE:
+                    tft.fillCircle(cx, dotY, 4, theme.green);
+                    break;
+                case Prayer::ROW_MISSED:
+                    tft.fillCircle(cx, dotY, 4, theme.red);
+                    break;
+                case Prayer::ROW_PENDING:
+                    tft.fillCircle(cx, dotY, 4, theme.accent);
+                    tft.drawCircle(cx, dotY, 5, theme.gold);
+                    break;
+                case Prayer::ROW_SNOOZED:
+                    tft.drawCircle(cx, dotY, 4, theme.textSec);
+                    tft.fillCircle(cx, dotY, 2, theme.textSec);
+                    break;
+                default:
+                    if (isNext) {
+                        tft.fillCircle(cx, dotY, 4, theme.gold);
+                        tft.drawCircle(cx, dotY, 6, theme.gold);
+                    } else {
+                        tft.drawCircle(cx, dotY, 3, theme.textDim);
+                    }
+                    break;
+            }
+
+            // Time (bottom of column)
+            tft.setTextColor(timeCol, colBg);
+            const char* tm = Prayer::current.prayers[i].time;
+            int twv = tft.textWidth(tm);
+            tft.setCursor(cx - twv / 2, stripY + 22);
+            tft.print(tm);
+        }
+        yPos = stripY + 32;
+
+        // Current local time in minutes (for the countdown + progress fill).
+        int nowMin = -1;
+        struct tm nt;
+        if (getLocalTime(&nt)) nowMin = nt.tm_hour * 60 + nt.tm_min;
+        int ishaMin = Prayer::toMinutes(Prayer::current.prayers[5].time);
+
+        // ── Summary line: prayed count (left) · missed count (right) ──
+        int doneCount = 0;
+        for (int i = 0; i < Prayer::PRAYER_COUNT; i++) {
+            if (i == 1) continue;  // Sunrise is not a prayer
+            if (Prayer::rowStateForIndex(i) == Prayer::ROW_DONE) doneCount++;
+        }
+        tft.setTextSize(1);
+        char leftBuf[16];
+        snprintf(leftBuf, sizeof(leftBuf), "%d prayed", doneCount);
+        tft.setTextColor(theme.green, theme.panel);
+        tft.setCursor(cardX + 12, yPos);
+        tft.print(leftBuf);
+
+        int missed = Prayer::missedCount();
+        if (missed > 0) {
+            char missBuf[16];
+            snprintf(missBuf, sizeof(missBuf), "%d missed", missed);
+            int rw = tft.textWidth(missBuf);
+            tft.setTextColor(theme.red, theme.panel);
+            tft.setCursor(cardX + cardW - rw - 12, yPos);
+            tft.print(missBuf);
+        }
+        yPos += 13;
+
+        // ── Countdown chip ─────────────────────────────────────────────────
+        // Design A fused with the progress bar: the chip body IS the bar — it
+        // fills from the previous prayer to the next one — with a gold edge,
+        // clock glyph, prayer name (left) and remaining time (right) overlaid.
+        int cdMin = Prayer::minutesUntilNext();
+        if (nextIdx == 1 && nowMin >= 0) {
+            // Fajr→Sunrise window: count to Dhuhr rather than Sunrise.
+            cdMin = Prayer::toMinutes(Prayer::current.prayers[2].time) - nowMin;
+        }
+        if (highlightIdx >= 0 && cdMin >= 0 && nowMin >= 0) {
+            // Fraction elapsed from the previous prayer to the next one.
+            int nextMin = Prayer::toMinutes(Prayer::current.prayers[highlightIdx].time);
+            int prevMin = -100000;
+            for (int j = 0; j < Prayer::PRAYER_COUNT; j++) {
+                int pm = Prayer::toMinutes(Prayer::current.prayers[j].time);
+                if (pm <= nowMin && pm > prevMin) prevMin = pm;
+            }
+            if (prevMin == -100000) prevMin = ishaMin - 1440;   // before Fajr today
+            int adjNext = nextMin;
+            if (adjNext <= prevMin) adjNext += 1440;             // wraps past midnight
+            float frac = 0.0f;
+            if (adjNext > prevMin) frac = (float)(nowMin - prevMin) / (float)(adjNext - prevMin);
+            if (frac < 0.0f) frac = 0.0f;
+            if (frac > 1.0f) frac = 1.0f;
+
+            bool urgent = (cdMin < 5);
+            uint16_t fillCol = urgent ? theme.accent : theme.green;
+            uint16_t timeCol = urgent ? theme.textPri : theme.gold;
+
+            const int chipX = cardX + 10, chipW = cardW - 20, chipH = 24;
+            const int chipY = yPos;
+
+            // Track, then progress fill, then the gold left edge bar.
+            tft.fillRoundRect(chipX, chipY, chipW, chipH, 5, theme.separator);
+            int fillW = (int)((chipW - 4) * frac);
+            if (fillW > 0) tft.fillRect(chipX + 4, chipY + 1, fillW, chipH - 2, fillCol);
+            tft.fillRect(chipX, chipY, 4, chipH, theme.gold);
+
+            // Clock glyph (gold) near the left.
+            int gx = chipX + 16, gy = chipY + chipH / 2;
+            tft.drawCircle(gx, gy, 6, theme.gold);
+            tft.drawCircle(gx, gy, 5, theme.gold);
+            tft.drawLine(gx, gy, gx, gy - 4, theme.gold);
+            tft.drawLine(gx, gy, gx + 3, gy + 1, theme.gold);
+
+            // Prayer name (left) — transparent bg so it sits over the fill.
+            tft.setFreeFont(&FreeSansBold9pt7b);
+            tft.setTextColor(theme.textPri);
+            tft.setCursor(gx + 12, chipY + chipH - 7);
+            tft.print(Prayer::current.prayers[highlightIdx].name);
+
+            // Remaining time (right) — bold.
+            char cdBuf[16];
+            int ch = cdMin / 60, cm = cdMin % 60;
+            if (ch > 0) snprintf(cdBuf, sizeof(cdBuf), "%dh %02dm", ch, cm);
+            else        snprintf(cdBuf, sizeof(cdBuf), "%dm", cm);
+            tft.setTextColor(timeCol);
+            int cw = tft.textWidth(cdBuf);
+            tft.setCursor(chipX + chipW - cw - 8, chipY + chipH - 7);
+            tft.print(cdBuf);
+
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            yPos += chipH + 4;
+        } else {
+            yPos += 2;
         }
 
-        // Time (right-aligned)
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textSec, theme.panel);
-        int tw = tft.textWidth(pTime);
-        tft.setCursor(cardX + cardW - tw - 14, yPos + 16);
-        tft.print(pTime);
-
-        tft.setFreeFont(nullptr);
-        yPos += 30;
-
-        // "Prayed" quick-action button when prayer is pending
-        if (curState == Prayer::ROW_PENDING) {
+        // ── "Prayed" quick-action button when the current prayer is due ──
+        int curIdx = Prayer::currentOrLastPrayerIndex();
+        if (curIdx >= 0 && Prayer::rowStateForIndex(curIdx) == Prayer::ROW_PENDING) {
+            yPos += 2;
             int btnW = 80, btnH = 22;
             int btnX = cardX + (cardW - btnW) / 2;
             tft.fillRoundRect(btnX, yPos, btnW, btnH, 6, theme.green);
@@ -1390,91 +1537,15 @@ static void drawHomePanel() {
             tft.print(pLabel);
             homePrayedButtonVisible = true;
             homePrayedButtonY = yPos;
-            yPos += 26;
+            yPos += btnH + 4;
         }
     }
 
     // ── Separator ──────────────────────────────────────────────────────────
     tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
-    yPos += 8;
+    yPos += 10;
 
-    // ── Section 2: Next Prayer + Countdown Bar ─────────────────────────────
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(cardX + 10, yPos);
-    tft.print("Next Prayer");
-    yPos += 12;
-
-    int nextIdx = Prayer::current.valid ? Prayer::current.nextIndex : -1;
-
-    if (!Prayer::current.valid || nextIdx < 0) {
-        tft.setTextSize(2);
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(cardX + 10, yPos + 4);
-        tft.print("---");
-        yPos += 30;
-    } else {
-        const char* nName = Prayer::current.prayers[nextIdx].name;
-        const char* nTime = Prayer::current.prayers[nextIdx].time;
-
-        // Edge bar
-        tft.fillRect(cardX + 6, yPos, 4, 28, theme.gold);
-
-        // Prayer name (large)
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textPri, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 16);
-        tft.print(nName);
-
-        // Time (right-aligned)
-        tft.setTextColor(theme.gold, theme.panel);
-        int tw = tft.textWidth(nTime);
-        tft.setCursor(cardX + cardW - tw - 14, yPos + 16);
-        tft.print(nTime);
-
-        tft.setFreeFont(nullptr);
-        yPos += 30;
-
-        // Countdown progress bar
-        int minutesLeft = Prayer::minutesUntilNext();
-        if (minutesLeft >= 0) {
-            const int barX = cardX + 12, barW = cardW - 24, barH = 10;
-            // Track
-            tft.fillRoundRect(barX, yPos, barW, barH, 4, theme.separator);
-            // Fill: invert so bar shrinks as time approaches (full = far away, empty = imminent)
-            // Use 120 min as "full" reference to keep it visually useful
-            float pct = 1.0f - ((float)minutesLeft / 120.0f);
-            if (pct < 0.0f) pct = 0.0f;
-            if (pct > 1.0f) pct = 1.0f;
-            int fillW = (int)(barW * pct);
-            // Color: gold when < 5 min, green otherwise
-            uint16_t barColor = (minutesLeft < 5) ? theme.gold : theme.green;
-            if (fillW > 0) {
-                tft.fillRoundRect(barX, yPos, fillW, barH, 4, barColor);
-            }
-
-            // Time remaining text overlay
-            char remBuf[12];
-            int h = minutesLeft / 60;
-            int m = minutesLeft % 60;
-            snprintf(remBuf, sizeof(remBuf), "%dh %02dm", h, m);
-            tft.setTextSize(1);
-            uint16_t remColor = (minutesLeft < 5) ? theme.gold : theme.textSec;
-            tft.setTextColor(remColor, theme.panel);
-            int rw = tft.textWidth(remBuf);
-            tft.setCursor(barX + barW - rw, yPos + barH + 2);
-            tft.print(remBuf);
-            yPos += barH + 14;
-        } else {
-            yPos += 4;
-        }
-    }
-
-    // ── Separator ──────────────────────────────────────────────────────────
-    tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
-    yPos += 8;
-
-    // ── Section 3: Stocks (rotates through all symbols) ────────────────────
+    // ── Section 2: Stocks (rotates through all symbols) ────────────────────
     drawHomeStockSection(cardX, cardW, yPos);
 
     drawPanelChevrons();
