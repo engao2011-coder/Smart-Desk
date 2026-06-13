@@ -717,6 +717,10 @@ static void drawHero(const struct tm& t) {
     tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
 
     // ── Left zone: Clock (x=12..134) ──
+    // Vertically-centred time with a gold accent rule and the weekday name
+    // beneath it. The prayer countdown that used to sit here was removed —
+    // it lives in the prayer widget below.
+    const int clockZoneW = 122;
     char hmBuf[6];
     snprintf(hmBuf, sizeof(hmBuf), "%02d:%02d", t.tm_hour, t.tm_min);
 
@@ -725,52 +729,31 @@ static void drawHero(const struct tm& t) {
     tft.setTextSize(1);
     tft.setFreeFont(&FreeSansBold24pt7b);
     int tw = tft.textWidth(hmBuf);
-    int clockX = 12 + (122 - tw) / 2;
+    int clockX = 12 + (clockZoneW - tw) / 2;
     if (clockX < 12) clockX = 12;
-    tft.setCursor(clockX, cardY + 42);
+    tft.setCursor(clockX, cardY + 48);
     tft.print(hmBuf);
 
-    // Prayer countdown subtitle under the clock.
-    auto prayerShortLabel = [](int idx) -> const char* {
-        switch (idx) {
-            case 0: return "FJR";
-            case 1: return "SUN";
-            case 2: return "DHR";
-            case 3: return "ASR";
-            case 4: return "MGB";
-            case 5: return "ISH";
-            default: return "---";
-        }
-    };
+    // Thin gold accent rule, as wide as the time, just below it.
+    int ruleW = tw;
+    int ruleX = 12 + (clockZoneW - ruleW) / 2;
+    if (ruleX < 12) ruleX = 12;
+    tft.drawFastHLine(ruleX, cardY + 60, ruleW, theme.gold);
 
+    // Weekday name beneath the rule.
+    static const char* const WEEKDAY[7] = {
+        "Sunday", "Monday", "Tuesday", "Wednesday",
+        "Thursday", "Friday", "Saturday"
+    };
+    const char* wd = WEEKDAY[(t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0];
     tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
-    int minutesLeft = Prayer::minutesUntilNext();
-    // Urgency color: gold when < 5 min, else dim
-    uint16_t cdColor = (minutesLeft >= 0 && minutesLeft < 5) ? theme.gold : theme.textDim;
-    tft.setTextColor(cdColor, theme.panel);
-    char nextBuf[40];
-    if (Prayer::current.valid && Prayer::current.nextIndex >= 0 && minutesLeft >= 0) {
-        int h = minutesLeft / 60;
-        int m = minutesLeft % 60;
-        snprintf(nextBuf, sizeof(nextBuf), "%s %02d:%02d",
-                 prayerShortLabel(Prayer::current.nextIndex),
-                 h, m);
-    } else {
-        snprintf(nextBuf, sizeof(nextBuf), "--- --:--");
-    }
-    int subW = tft.textWidth(nextBuf);
-    // Pulsing alive dot (toggles every second)
-    bool dotOn = (millis() / 1000) % 2 == 0;
-    const char* dotStr = dotOn ? " *" : "  ";
-    int dotW = tft.textWidth(dotStr);
-    int totalW = subW + dotW;
-    int subX = 12 + (122 - totalW) / 2;
-    if (subX < 12) subX = 12;
-    tft.setCursor(subX, cardY + 64);
-    tft.print(nextBuf);
-    tft.setTextColor(dotOn ? theme.gold : theme.panel, theme.panel);
-    tft.print(dotStr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.panel);
+    int wdw = tft.textWidth(wd);
+    int wdx = 12 + (clockZoneW - wdw) / 2;
+    if (wdx < 12) wdx = 12;
+    tft.setCursor(wdx, cardY + 76);
+    tft.print(wd);
 
     // ── Vertical divider ──
     const int divX = 138;
@@ -810,10 +793,11 @@ static void drawHero(const struct tm& t) {
     } else {
         const Weather::Data& w = Weather::current;
         uint16_t wAccent = Weather::iconColor(w.iconCode);
+        const int wZoneW = 80;  // usable width of the right zone
 
         // Weather icon (centered in right zone, near top)
-        int iconCx = rZoneX + 38;
-        int iconCy = cardY + 22;
+        int iconCx = rZoneX + wZoneW / 2;
+        int iconCy = cardY + 20;
         drawWeatherIcon(iconCx, iconCy, w.iconCode);
 
         // Temperature below icon
@@ -824,8 +808,8 @@ static void drawHero(const struct tm& t) {
         tft.setFreeFont(&FreeSansBold12pt7b);
         tft.setTextColor(wAccent, theme.panel);
         tw = tft.textWidth(tempBuf);
-        int tempX = rZoneX + (76 - tw) / 2;
-        tft.setCursor(tempX, cardY + 56);
+        int tempX = rZoneX + (wZoneW - tw) / 2;
+        tft.setCursor(tempX, cardY + 50);
         tft.print(tempBuf);
 
         // Condition label
@@ -834,15 +818,24 @@ static void drawHero(const struct tm& t) {
         tft.setTextColor(theme.textSec, theme.panel);
         const char* label = Weather::iconLabel(w.iconCode);
         int lw = tft.textWidth(label);
-        int lx = rZoneX + (76 - lw) / 2;
-        tft.setCursor(lx, cardY + 66);
+        int lx = rZoneX + (wZoneW - lw) / 2;
+        tft.setCursor(lx, cardY + 62);
         tft.print(label);
+
+        // Humidity line
+        char humBuf[12];
+        snprintf(humBuf, sizeof(humBuf), "Hum %.0f%%", w.humidity);
+        tft.setTextColor(theme.textDim, theme.panel);
+        int hw = tft.textWidth(humBuf);
+        int hx = rZoneX + (wZoneW - hw) / 2;
+        tft.setCursor(hx, cardY + 76);
+        tft.print(humBuf);
 
         // City name
         tft.setTextColor(theme.textDim, theme.panel);
         int cn = tft.textWidth(w.cityName);
-        int cnx = rZoneX + (76 - cn) / 2;
-        tft.setCursor(cnx, cardY + 78);
+        int cnx = rZoneX + (wZoneW - cn) / 2;
+        tft.setCursor(cnx, cardY + 88);
         tft.print(w.cityName);
     }
 
