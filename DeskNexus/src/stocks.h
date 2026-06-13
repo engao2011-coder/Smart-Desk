@@ -177,16 +177,24 @@ static float euroPrice(const Quote& q) {
 }
 
 // ---------------------------------------------------------------------------
-// Percentage to display for a quote, honouring the system-wide metric choice
-// (Settings::stockFromPeak). Falls back to the daily change when 52-week-high
-// data is unavailable so a symbol is never left blank. Used by both the
-// summary page and the stocks page so they always agree.
+// The two change metrics shown side by side:
+//   metricPct() — daily change vs the previous close (the "1D" figure). This
+//                 is the primary signal: it drives row sorting, the edge-bar
+//                 colour, and the price-move alert.
+//   peakPct()   — change vs the 52-week high (the "52W" figure), shown as
+//                 secondary context. Only meaningful when hasPeak() is true.
 // ---------------------------------------------------------------------------
 static float metricPct(const Quote& q) {
-    if (Settings::stockFromPeak && q.fiftyTwoWeekHigh != 0.0f) {
-        return q.changeFromPeakPct;
-    }
     return q.changePct;
+}
+
+static float peakPct(const Quote& q) {
+    return q.changeFromPeakPct;
+}
+
+// True when a 52-week high was reported, so the "52W" figure is real and not 0.
+static bool hasPeak(const Quote& q) {
+    return q.fiftyTwoWeekHigh != 0.0f;
 }
 
 // ---------------------------------------------------------------------------

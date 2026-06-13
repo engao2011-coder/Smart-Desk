@@ -55,10 +55,6 @@ static int  breakReminderInterval = BREAK_REMINDER_INTERVAL_M;  // minutes
 // Stocks currency display — when true prices are converted to EUR
 static bool stockEuro = false;
 
-// Stock change metric — when true both pages show change vs the 52-week high
-// (from-peak %); when false they show the daily change vs previous close.
-static bool stockFromPeak = true;
-
 // Stock refresh interval in minutes (maps to STOCK_REFRESH_MS default)
 static int  stockRefreshMin = STOCK_REFRESH_MS / 60000;
 
@@ -155,7 +151,6 @@ static void load() {
     breakReminderInterval = prefs.getInt("brkInt", breakReminderInterval);
 
     stockEuro = prefs.getBool("stkEur", stockEuro);
-    stockFromPeak = prefs.getBool("stkPeak", stockFromPeak);
     stockRefreshMin = prefs.getInt("stkRef", stockRefreshMin);
     prefs.getString("admPw", adminPassword, sizeof(adminPassword));
 
@@ -216,7 +211,6 @@ static void save() {
     prefs.putInt("brkInt", breakReminderInterval);
 
     prefs.putBool("stkEur", stockEuro);
-    prefs.putBool("stkPeak", stockFromPeak);
     prefs.putInt("stkRef", stockRefreshMin);
     prefs.putString("admPw", adminPassword);
 
@@ -272,7 +266,6 @@ static void resetToDefaults() {
     breakReminderInterval = BREAK_REMINDER_INTERVAL_M;
 
     stockEuro = false;
-    stockFromPeak = true;
     stockRefreshMin = STOCK_REFRESH_MS / 60000;
     adminPassword[0] = '\0';
 
