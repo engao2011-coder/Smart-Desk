@@ -676,13 +676,7 @@ static String settingsPage() {
       Show prices in EUR (uses live USD/GBP&rarr;EUR exchange rate from Yahoo Finance)
     </label>
     <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>
-    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-      <input type="checkbox" name="stkPeak" value="1")rawhtml";
-    if (Settings::stockFromPeak) html += " checked";
-    html += R"rawhtml(>
-      Show change vs 52-week high (off = daily change vs previous close)
-    </label>
-    <p class="hint">Applies to both the summary page and the stocks page. When a symbol has no 52-week high data, it falls back to the daily change.</p>
+    <p class="hint">Both the daily change (1D, vs previous close) and the change vs the 52-week high (52W) are shown together on the device.</p>
     )rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
@@ -694,6 +688,11 @@ static String settingsPage() {
             else if (Stocks::quotes[i].valid) { txt = "&#10003; ok";                              col = "#4ecca3"; }
             else                              { txt = "&hellip; loading";                         col = "#9aa0a6"; }
             html += " <span style=\"font-size:.78rem;font-weight:600;color:" + String(col) + "\">" + txt + "</span>";
+            // Show the resolved company/fund name once it has been fetched.
+            if (Stocks::quotes[i].name[0]) {
+                html += " <span style=\"font-size:.78rem;color:#9aa0a6\">&middot; " +
+                        htmlEscape(String(Stocks::quotes[i].name)) + "</span>";
+            }
         }
         html += "</label>";
         html += "<input type=\"text\" name=\"stk" + String(i) +
@@ -1031,9 +1030,6 @@ static void handleSaveSettings() {
 
     // Stocks — currency display
     Settings::stockEuro = server.hasArg("stkEur") && server.arg("stkEur") == "1";
-
-    // Stocks — change metric (52-week high vs daily change)
-    Settings::stockFromPeak = server.hasArg("stkPeak") && server.arg("stkPeak") == "1";
 
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {

@@ -40,6 +40,7 @@ static constexpr uint8_t ATTENTION_FAIL_THRESHOLD = 4;
 // ---------------------------------------------------------------------------
 struct Quote {
     char   symbol[24]     = {};
+    char   name[40]       = {};        // human-readable name from Yahoo (shortName)
     float  price          = 0.0f;
     float  change         = 0.0f;     // absolute change
     float  changePct      = 0.0f;     // percentage change
@@ -176,16 +177,34 @@ static float euroPrice(const Quote& q) {
 }
 
 // ---------------------------------------------------------------------------
-// Percentage to display for a quote, honouring the system-wide metric choice
-// (Settings::stockFromPeak). Falls back to the daily change when 52-week-high
-// data is unavailable so a symbol is never left blank. Used by both the
-// summary page and the stocks page so they always agree.
+// The two change metrics shown side by side:
+//   metricPct() — daily change vs the previous close (the "1D" figure). This
+//                 is the primary signal: it drives row sorting, the edge-bar
+//                 colour, and the price-move alert.
+//   peakPct()   — change vs the 52-week high (the "52W" figure), shown as
+//                 secondary context. Only meaningful when hasPeak() is true.
 // ---------------------------------------------------------------------------
 static float metricPct(const Quote& q) {
-    if (Settings::stockFromPeak && q.fiftyTwoWeekHigh != 0.0f) {
-        return q.changeFromPeakPct;
-    }
     return q.changePct;
+}
+
+static float peakPct(const Quote& q) {
+    return q.changeFromPeakPct;
+}
+
+// True when a 52-week high was reported, so the "52W" figure is real and not 0.
+static bool hasPeak(const Quote& q) {
+    return q.fiftyTwoWeekHigh != 0.0f;
+}
+
+// ---------------------------------------------------------------------------
+// Human-readable label for a quote: the fetched company/fund name when we have
+// it, otherwise the ticker symbol so a row is never blank while a name loads.
+// ---------------------------------------------------------------------------
+static const char* displayName(const Quote& q) {
+    if (q.name[0] != '\0') return q.name;
+    if (q.symbol[0] != '\0') return q.symbol;
+    return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -234,17 +253,19 @@ static bool fetchOne(int idx) {
     }
 
     // Filter keeps only the fields we need, reducing heap usage
-    StaticJsonDocument<256> filter;
+    StaticJsonDocument<384> filter;
     filter["chart"]["error"]                                                 = true;
     filter["chart"]["result"][0]["meta"]["regularMarketPrice"]               = true;
     filter["chart"]["result"][0]["meta"]["chartPreviousClose"]               = true;
     filter["chart"]["result"][0]["meta"]["fiftyTwoWeekHigh"]                 = true;
+    filter["chart"]["result"][0]["meta"]["shortName"]                        = true;
+    filter["chart"]["result"][0]["meta"]["longName"]                         = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["open"]           = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["high"]           = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["low"]            = true;
     filter["chart"]["result"][0]["indicators"]["quote"][0]["volume"]         = true;
 
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<768> doc;
     DeserializationError err = deserializeJson(doc, http.getStream(),
                                               DeserializationOption::Filter(filter));
     http.end();
@@ -285,6 +306,16 @@ static bool fetchOne(int idx) {
     Quote& quote = quotes[idx];
     quote.prevFetchPrice = quote.valid ? quote.price : 0.0f;  // capture before overwrite
     strncpy(quote.symbol, sym, sizeof(quote.symbol) - 1);
+
+    // Prefer the concise shortName (e.g. "Apple Inc."); fall back to longName.
+    // Leave name empty when neither is present so displayName() shows the symbol.
+    const char* nm = result["meta"]["shortName"] | (const char*)nullptr;
+    if (!nm || nm[0] == '\0') nm = result["meta"]["longName"] | (const char*)nullptr;
+    if (nm && nm[0] != '\0') {
+        strncpy(quote.name, nm, sizeof(quote.name) - 1);
+        quote.name[sizeof(quote.name) - 1] = '\0';
+    }
+
     quote.price     = price;
     quote.prevClose = prevClose;
     quote.open      = q["open"][0]   | 0.0f;
@@ -421,11 +452,17 @@ static void begin() {
         quotes[i].status    = STATUS_PENDING;
         quotes[i].failCount = 0;
         if (strlen(Settings::stockSymbols[i]) > 0) {
+            // If the symbol changed, drop the old name so we don't show a stale
+            // label next to the new ticker until the next fetch fills it in.
+            if (strcmp(quotes[i].symbol, Settings::stockSymbols[i]) != 0) {
+                quotes[i].name[0] = '\0';
+            }
             strncpy(quotes[i].symbol, Settings::stockSymbols[i], sizeof(quotes[i].symbol) - 1);
         } else {
             // Slot cleared — drop any old data so it doesn't linger on screen.
             quotes[i].valid = false;
             quotes[i].symbol[0] = '\0';
+            quotes[i].name[0] = '\0';
         }
     }
     // Reset rate cache so next fetchNext() cycle re-fetches if stockEuro is on

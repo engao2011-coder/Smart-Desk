@@ -1153,6 +1153,37 @@ static void drawTapHint(int cardX, int cardW, int y) {
 // draw so updateHomeStockSection() can repaint just this region (no flicker).
 static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
 
+// ---------------------------------------------------------------------------
+// Copy `src` into `out`, dropping trailing characters and appending an
+// ellipsis until the text fits within `maxW` pixels at the CURRENT font/size.
+// Leaves the text untouched when it already fits. Used to keep long stock
+// names on a single line.
+// ---------------------------------------------------------------------------
+static void fitTextToWidth(const char* src, int maxW, char* out, size_t outSz) {
+    if (outSz == 0) return;
+    if (tft.textWidth(src) <= maxW) {
+        strncpy(out, src, outSz - 1);
+        out[outSz - 1] = '\0';
+        return;
+    }
+    static const char ell[] = "..";
+    int ellW = tft.textWidth(ell);
+    size_t n = strlen(src);
+    while (n > 0) {
+        char tmp[48];
+        size_t cn = (n < sizeof(tmp)) ? n : sizeof(tmp) - 1;
+        memcpy(tmp, src, cn);
+        tmp[cn] = '\0';
+        if (tft.textWidth(tmp) + ellW <= maxW) {
+            snprintf(out, outSz, "%s%s", tmp, ell);
+            return;
+        }
+        n = cn - 1;
+    }
+    strncpy(out, ell, outSz - 1);
+    out[outSz - 1] = '\0';
+}
+
 // Draw Section 3 of the Home card: the rotating stock quote (Stocks::displayIndex).
 static void drawHomeStockSection(int cardX, int cardW, int yPos) {
     homeStockSecX = cardX; homeStockSecW = cardW; homeStockSecY = yPos;
@@ -1180,25 +1211,54 @@ static void drawHomeStockSection(int cardX, int cardW, int yPos) {
         // Edge bar
         tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
 
-        // Symbol
+        // Line 1, right: daily change ("1D") — primary, big bold figure with a
+        // small dim label. Measured first so the name knows its budget.
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        char dBuf[16];
+        const char* arrow = (mPct >= 0) ? " +" : " ";
+        snprintf(dBuf, sizeof(dBuf), "%s%.2f%%", arrow, mPct);
+        int dW    = tft.textWidth(dBuf);
+        int dNumX = cardX + cardW - 14 - dW;
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+        int d1W = tft.textWidth("1D");
+        int d1X = dNumX - d1W - 5;
+
+        // Name (left) — shrink to the small built-in font, then truncate, when
+        // the bold name would collide with the 1D figure.
+        const char* nm       = Stocks::displayName(q);
+        int         nameX    = cardX + 16;
+        int         nameMaxW = d1X - nameX - 8;
+        char        nameBuf[44];
         tft.setFreeFont(&FreeSansBold9pt7b);
         tft.setTextColor(theme.textPri, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 16);
-        tft.print(q.symbol);
+        if (tft.textWidth(nm) <= nameMaxW) {
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setCursor(nameX, yPos + 16);
+            tft.print(nameBuf);
+        } else {
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setCursor(nameX, yPos + 10);
+            tft.print(nameBuf);
+        }
 
-        // % change (right, with arrow)
-        char pctBuf[16];
-        const char* arrow = (mPct >= 0) ? " +" : " ";
-        snprintf(pctBuf, sizeof(pctBuf), "%s%.2f%%", arrow, mPct);
+        // "1D" label + daily figure
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(d1X, yPos + 6);
+        tft.print("1D");
+        tft.setFreeFont(&FreeSansBold9pt7b);
         tft.setTextColor(pctColor, theme.panel);
-        int pw = tft.textWidth(pctBuf);
-        tft.setCursor(cardX + cardW - pw - 14, yPos + 16);
-        tft.print(pctBuf);
+        tft.setCursor(dNumX, yPos + 16);
+        tft.print(dBuf);
 
         tft.setFreeFont(nullptr);
         yPos += 20;
 
-        // Price below symbol
+        // Line 2, left: price.
         char priceBuf[16];
         if (Settings::stockEuro) {
             snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
@@ -1210,7 +1270,27 @@ static void drawHomeStockSection(int cardX, int cardW, int yPos) {
         tft.setCursor(cardX + 16, yPos + 2);
         tft.print(priceBuf);
 
-        // Alert dot
+        // Line 2, right: 52-week change ("52W") — secondary context, small.
+        // "--" when no 52-week high was reported. Reserve room for the alert dot.
+        bool  hp   = Stocks::hasPeak(q);
+        float pPct = Stocks::peakPct(q);
+        char  pBuf[12];
+        if (hp) snprintf(pBuf, sizeof(pBuf), "%+.2f%%", pPct);
+        else    snprintf(pBuf, sizeof(pBuf), "--");
+        uint16_t pCol = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
+        tft.setTextSize(1);
+        int pW    = tft.textWidth(pBuf);
+        int pRight = cardX + cardW - (q.alertTriggered ? 22 : 12);
+        int pNumX = pRight - pW;
+        int p1X   = pNumX - tft.textWidth("52W") - 4;
+        tft.setTextColor(theme.textDim, theme.panel);
+        tft.setCursor(p1X, yPos + 2);
+        tft.print("52W");
+        tft.setTextColor(pCol, theme.panel);
+        tft.setCursor(pNumX, yPos + 2);
+        tft.print(pBuf);
+
+        // Alert dot (daily move beyond the alert threshold)
         if (q.alertTriggered) {
             tft.fillCircle(cardX + cardW - 16, yPos + 4, 3, theme.gold);
         }
@@ -1782,30 +1862,47 @@ static void drawStocksPanel() {
                 tft.print("...");
             }
         } else {
-            // Active metric (daily or from-peak), per Settings::stockFromPeak
-            float displayPct = Stocks::metricPct(q);
-            uint16_t pctColor = (displayPct >= 0) ? theme.green : theme.red;
-
-            // Row 1: Symbol + Change % (size 2) — primary signal
+            // Row 1, right: daily change ("1D") — primary, size-2 figure with a
+            // small dim label. Measured first so the name gets the rest of the
+            // row width. Numbers right-align at SCREEN_W-24 on both rows; the
+            // alert dot lives in the margin to the right of them.
+            float dPct = Stocks::metricPct(q);
+            uint16_t dCol = (dPct >= 0) ? theme.green : theme.red;
+            char dBuf[12];
+            snprintf(dBuf, sizeof(dBuf), "%+.2f%%", dPct);
             tft.setTextSize(2);
-            tft.setTextColor(theme.textPri, rowBg);
-            tft.setCursor(26, ry + 2);
-            if (strlen(q.symbol) > 0) {
-                tft.print(q.symbol);
-            } else {
-                tft.print(Settings::stockSymbols[i]);
+            int dW    = tft.textWidth(dBuf);
+            int dNumX = SCREEN_W - 24 - dW;
+            tft.setTextSize(1);
+            int d1X = dNumX - tft.textWidth("1D") - 5;
+
+            // Name (left): prefer size 2; shrink to size 1, then truncate.
+            const char* nm       = Stocks::displayName(q);
+            int         nameX    = 26;
+            int         nameMaxW = d1X - nameX - 8;
+            char        nameBuf[44];
+            int         nameY    = ry + 2;
+            tft.setTextSize(2);
+            if (tft.textWidth(nm) > nameMaxW) {
+                tft.setTextSize(1);   // shrink before resorting to truncation
+                nameY = ry + 6;
             }
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setTextColor(theme.textPri, rowBg);
+            tft.setCursor(nameX, nameY);
+            tft.print(nameBuf);
 
-            char pctBuf[12];
-            snprintf(pctBuf, sizeof(pctBuf), "%+.2f%%", displayPct);
-            tft.setTextColor(pctColor, rowBg);
-            int pctW = tft.textWidth(pctBuf);
-            tft.setCursor(SCREEN_W - pctW - 24, ry + 2);
-            tft.print(pctBuf);
+            // "1D" label + daily figure
+            tft.setTextSize(1);
+            tft.setTextColor(theme.textDim, rowBg);
+            tft.setCursor(d1X, ry + 7);
+            tft.print("1D");
+            tft.setTextSize(2);
+            tft.setTextColor(dCol, rowBg);
+            tft.setCursor(dNumX, ry + 2);
+            tft.print(dBuf);
 
-            // Row 2: Price under the symbol — secondary context.
-            // Left-aligned so each row reads top-down: symbol / price on the
-            // left, % change on the right (no redundant "Price" label).
+            // Row 2, left: price — secondary context.
             char priceBuf[14];
             if (Settings::stockEuro) {
                 snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
@@ -1817,9 +1914,28 @@ static void drawStocksPanel() {
             tft.setCursor(26, ry + 21);
             tft.print(priceBuf);
 
-            // Alert dot
+            // Row 2, right: 52-week change ("52W"), small. "--" when no
+            // 52-week high was reported for this symbol.
+            bool  hp   = Stocks::hasPeak(q);
+            float pPct = Stocks::peakPct(q);
+            char  pBuf[12];
+            if (hp) snprintf(pBuf, sizeof(pBuf), "%+.2f%%", pPct);
+            else    snprintf(pBuf, sizeof(pBuf), "--");
+            uint16_t pCol = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
+            tft.setTextSize(1);
+            int pW    = tft.textWidth(pBuf);
+            int pNumX = SCREEN_W - 24 - pW;
+            int p1X   = pNumX - tft.textWidth("52W") - 5;
+            tft.setTextColor(theme.textDim, rowBg);
+            tft.setCursor(p1X, ry + 21);
+            tft.print("52W");
+            tft.setTextColor(pCol, rowBg);
+            tft.setCursor(pNumX, ry + 21);
+            tft.print(pBuf);
+
+            // Alert dot — in the right margin, clear of both figures.
             if (q.alertTriggered) {
-                tft.fillCircle(SCREEN_W - 36, ry + 8, 3, theme.gold);
+                tft.fillCircle(SCREEN_W - 12, ry + 16, 3, theme.gold);
             }
         }
 
