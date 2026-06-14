@@ -488,7 +488,6 @@ void loop() {
                 firstDraw = false;
             }
         } else if (timeOk) {
-            UI::drawStatusBar(wifiOk, date, ipAddr);
             UI::updateClock(t);
         }
     }
@@ -574,11 +573,6 @@ void loop() {
         if (UI::shouldFireBreakReminder()) {
             UI::fireBreakReminder();
         }
-    }
-
-    // ── Carousel auto-advance (checked every loop iteration) ──────────────
-    if (UI::shouldAutoAdvance()) {
-        UI::advancePage();           // sets needsRedraw=true
     }
 
     // ── Idle return to Home page ──────────────────────────────────────────

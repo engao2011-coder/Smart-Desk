@@ -14,12 +14,14 @@
  *  ├────────────────────────┤ y=124
  *  │                        │
  *  │  Panel      (196 px)   │  Home (0), Prayer (1), Forecast (2), Stocks (3)
- *  │                        │  Home is idle landing page; detail pages auto-carousel
+ *  │                        │  Home is the dashboard / hub; the rest are detail pages
  *  └────────────────────────┘ y=320
  *
- * Touch: tap right half of panel → next page, left half → prev page.
- * Home page: tap prayer section → prayer detail, tap stock → stocks detail.
- * After 60s idle, returns to Home page automatically.
+ * Navigation is location-based — you reach a page by tapping its widget on the
+ * Home dashboard: tap the weather (hero, right) → weather page, tap the prayer
+ * section → prayer detail, tap the stocks section → stocks detail. On any detail
+ * page, a tap on the panel returns to Home. After 60s idle it also returns to
+ * Home automatically. (Pages no longer auto-rotate on a timer.)
  *
  * Fonts used: TFT_eSPI built-in Free fonts (FreeSansBold24pt7b etc.)
  */
@@ -83,15 +85,27 @@ static const Theme THEME_LIGHT = {
 // ---------------------------------------------------------------------------
 // Layout constants  (v3 — merged hero widget, larger panel)
 // ---------------------------------------------------------------------------
-#define LAYOUT_STATUS_Y    0
-#define LAYOUT_STATUS_H    24
-#define LAYOUT_HERO_Y      24
-#define LAYOUT_HERO_H      100
-#define LAYOUT_PANEL_Y     124
-#define LAYOUT_PANEL_H     196
-
 #define SCREEN_W  240
 #define SCREEN_H  320
+
+// There is no status bar or hero any more — every page fills the whole screen.
+// Home draws its own tile grid (see HOME_* below); the detail pages draw a
+// single full-screen panel via the shared LAYOUT_PANEL_* rect.
+#define PANEL_Y_FULL       0
+#define PANEL_H_FULL       SCREEN_H
+
+// Active panel rect — updated per page by updatePanelLayout().
+static int LAYOUT_PANEL_Y = PANEL_Y_FULL;
+static int LAYOUT_PANEL_H = PANEL_H_FULL;
+
+// ── Home dashboard grid ──────────────────────────────────────────────────
+// Four full-width horizontal rows stacked top-to-bottom: Time/date, Weather,
+// Prayer, Stocks. Tapping a row (except the time row) opens its detail page.
+#define HOME_ROW_H   (SCREEN_H / 4)      // 80 px per row
+#define HOME_TIME_Y  0                   // time/date banner
+#define HOME_WEA_Y   HOME_ROW_H          // weather row   (80)
+#define HOME_PRA_Y   (HOME_ROW_H * 2)    // prayer row    (160)
+#define HOME_STK_Y   (HOME_ROW_H * 3)    // stocks row    (240)
 
 // Page indices (no Settings page on display)
 #define PAGE_HOME      0
@@ -141,15 +155,6 @@ static unsigned long carouselPauseDuration = 0;  // 0 = not paused
 // Page dot pulse animation
 static unsigned long dotPulseStart      = 0;
 
-// Home page "Prayed" button state (set by drawHomePanel, read by handleTouch)
-static bool homePrayedButtonVisible = false;
-static int  homePrayedButtonY = 0;
-
-// Home card Stocks-section geometry (set by drawHomeStockSection, read by
-// handleTouch + updateHomeStockSection). Declared early so the touch handler
-// can use the section top as the prayer/stocks tap boundary.
-static int homeStockSecX = 0, homeStockSecW = 0, homeStockSecY = -1;
-
 // Break reminder state
 static unsigned long breakLastNotify    = 0;     // millis() of last break notification
 static bool          breakScreenActive  = false;  // full-screen break reminder showing
@@ -159,11 +164,6 @@ static unsigned long breakScreenStart   = 0;      // when break screen was shown
 static uint16_t calData[5] = TOUCH_CAL_DATA;
 
 // ── Small helpers ──────────────────────────────────────────────────────────
-static void hline(int y, uint16_t color) {
-    tft.drawFastHLine(0, y, SCREEN_W, color);
-}
-static void hline(int y) { hline(y, theme.separator); }
-
 static void fillPanel(int y, int h, uint16_t color) {
     tft.fillRect(0, y, SCREEN_W, h, color);
 }
@@ -286,43 +286,6 @@ static bool isPageAllowed(int page) {
     return true;
 }
 
-static int nextAllowedPage(int fromPage, int direction) {
-    int page = fromPage;
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        page = (page + direction + PAGE_COUNT) % PAGE_COUNT;
-        if (isPageAllowed(page)) {
-            return page;
-        }
-    }
-    return PAGE_PRAYER;
-}
-
-// Carousel-safe page advance — skips PAGE_HOME and PAGE_BREAK (home is the idle landing page,
-// break is event-driven). Cycles through the detail pages only.
-static int nextCarouselPage(int fromPage, int direction) {
-    int page = fromPage;
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        page = (page + direction + PAGE_COUNT) % PAGE_COUNT;
-        if (page != PAGE_HOME && page != PAGE_BREAK && isPageAllowed(page)) {
-            return page;
-        }
-    }
-    return PAGE_PRAYER;
-}
-
-static bool switchPageBy(int direction) {
-    int nextPage = nextAllowedPage(activePage, direction);
-    bool changed = (nextPage != activePage);
-    if (changed) {
-        playPanelTransition(direction);
-        dotPulseStart = millis();
-    }
-    activePage = nextPage;
-    lastPageSwitch = millis();
-    needsRedraw = true;
-    return changed;
-}
-
 static bool coerceAllowedActivePage() {
     if (isPageAllowed(activePage)) return false;
     activePage = PAGE_HOME;
@@ -330,25 +293,12 @@ static bool coerceAllowedActivePage() {
     return true;
 }
 
-static void advancePage() {
-    // Use carousel-safe advance that skips PAGE_STOCKS;
-    // stocks page is only shown when a stock moves >= STOCK_INTRA_CHANGE_PCT
-    int nextPage = nextCarouselPage(activePage, 1);
-    if (nextPage != activePage) {
-        playPanelTransition(1);
-        dotPulseStart = millis();
-    }
-    activePage = nextPage;
-    lastPageSwitch = millis();
-    needsRedraw = true;
-}
-
-static bool shouldAutoAdvance() {
-    if (activePage == PAGE_HOME) return false;  // Home is the idle page, don't auto-advance
-    // Rollover-safe pause check (subtraction wraps correctly at the millis() overflow).
-    if (carouselPauseDuration > 0 &&
-        (millis() - carouselPauseStart) < carouselPauseDuration) return false;
-    return (millis() - lastPageSwitch) >= CAROUSEL_INTERVAL_MS;
+// Every page now fills the whole screen (no status bar / hero). Kept as a hook
+// in case pages need different rects again, and so the banner overlay and
+// detail panels share a single source of truth.
+static void updatePanelLayout() {
+    LAYOUT_PANEL_Y = PANEL_Y_FULL;   // 0
+    LAYOUT_PANEL_H = PANEL_H_FULL;   // full height
 }
 
 // Return to Home page after idle timeout on any detail page
@@ -499,46 +449,25 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         return true;
     }
 
-    // Home page touch zones — drill into detail pages or quick-prayed
-    if (activePage == PAGE_HOME && (int)ty >= LAYOUT_PANEL_Y) {
-        const int cardY = LAYOUT_PANEL_Y + 8;
-        // "Prayed" quick-action button on Home
-        if (homePrayedButtonVisible) {
-            int btnW = 80, btnH = 22;
-            int btnX = 8 + (SCREEN_W - 16 - btnW) / 2;
-            if ((int)ty >= homePrayedButtonY && (int)ty < homePrayedButtonY + btnH &&
-                (int)tx >= btnX && (int)tx < btnX + btnW) {
-                tft.fillRoundRect(btnX, homePrayedButtonY, btnW, btnH, 6, theme.textDim);
-                delay(120);
-                Prayer::markPendingPrayed();
-                needsRedraw = true;
-                return true;
-            }
+    // Home page rows — the top time/date row isn't a link; the weather, prayer
+    // and stocks rows below open their detail page based on which row was tapped.
+    if (activePage == PAGE_HOME) {
+        if ((int)ty < HOME_WEA_Y) {
+            return true;   // time row — consume but don't navigate
         }
-        // Prayer timeline occupies the top of the card, the stocks section the
-        // bottom. Use the recorded stocks-section top as the split so the zones
-        // always match what was drawn (falls back to ~2/3 before first draw).
-        int stockTop = (homeStockSecY > 0) ? homeStockSecY - 4
-                                           : LAYOUT_PANEL_Y + (LAYOUT_PANEL_H * 2 / 3);
-        if ((int)ty < stockTop) {
-            // Tap prayer area → drill to full prayer list
+        int targetPage;
+        if ((int)ty < HOME_PRA_Y)      targetPage = PAGE_FORECAST;  // weather row
+        else if ((int)ty < HOME_STK_Y) targetPage = PAGE_PRAYER;    // prayer row
+        else                           targetPage = PAGE_STOCKS;    // stocks row
+
+        if (isPageAllowed(targetPage)) {
             playPanelTransition(1);
             dotPulseStart = millis();
-            activePage = PAGE_PRAYER;
+            activePage = targetPage;
             lastPageSwitch = millis();
             needsRedraw = true;
-            return true;
-        } else {
-            // Tap stock area → drill to full stocks page (if allowed)
-            if (isPageAllowed(PAGE_STOCKS)) {
-                playPanelTransition(1);
-                dotPulseStart = millis();
-                activePage = PAGE_STOCKS;
-                lastPageSwitch = millis();
-                needsRedraw = true;
-                return true;
-            }
         }
+        return true;
     }
 
     // Tap a MISSED prayer row to retroactively mark it as prayed
@@ -547,7 +476,7 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         const int pendingForTouch = Prayer::pendingPrayerIndex();
         const int footerHTouch = pendingForTouch >= 0 ? 52 : 0;
         const int availHTouch = (LAYOUT_PANEL_Y + LAYOUT_PANEL_H - 14) - (LAYOUT_PANEL_Y + 14) - footerHTouch;
-        const int ROW_H  = max(22, min(30, availHTouch / Prayer::PRAYER_COUNT));
+        const int ROW_H  = max(22, min(46, availHTouch / Prayer::PRAYER_COUNT));
         const int START_Y = LAYOUT_PANEL_Y + 14;
         int tappedIdx = ((int)ty - START_Y) / ROW_H + prayerScrollOffset;
         if (tappedIdx >= 0 && tappedIdx < Prayer::PRAYER_COUNT) {
@@ -559,84 +488,14 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         }
     }
 
-    // Only panel area is tappable for page switching
-    if (ty >= LAYOUT_PANEL_Y) {
-        bool changed = false;
-        if (tx >= SCREEN_W / 2) {
-            // Right half → next page
-            changed = switchPageBy(1);
-        } else {
-            // Left half → previous page
-            changed = switchPageBy(-1);
-        }
-
-        if (changed) {
-            // Wipe transition already played in switchPageBy()
-            return true;
-        }
-        return false;
+    // Navigation is location-based: pages are chosen by tapping their widget on
+    // the Home dashboard (weather/prayer/stocks). On any detail page, a tap on
+    // the panel simply returns to Home so the next page can be picked.
+    if (ty >= LAYOUT_PANEL_Y && activePage != PAGE_HOME) {
+        returnToHome();
+        return true;
     }
     return false;
-}
-
-// ---------------------------------------------------------------------------
-// Status bar (y=0..23) with page dots
-// ---------------------------------------------------------------------------
-static void drawStatusBar(bool wifiOk, const String& dateStr, const String& ipStr) {
-    tft.fillRect(0, LAYOUT_STATUS_Y, SCREEN_W, LAYOUT_STATUS_H, theme.panel);
-
-    // WiFi indicator
-    uint16_t wifiColor = wifiOk ? theme.green : theme.red;
-    tft.fillCircle(11, 11, 5, wifiColor);
-    tft.drawCircle(11, 11, 7, theme.panel);
-
-    tft.setTextSize(1);
-    tft.setFreeFont(nullptr);
-
-    // Page dots — right side (ring vs filled + accent glow for active)
-    const int DOT_R = 4;
-    const int DOT_GAP = 14;
-    int dotsW = PAGE_COUNT * DOT_GAP;
-    int dotX = SCREEN_W - dotsW - 8;
-    bool pulsing = (millis() - dotPulseStart) < 300;
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        int cx = dotX + i * DOT_GAP + DOT_R;
-        int cy = 11;
-        bool allowed = isPageAllowed(i);
-        if (i == activePage) {
-            int r = pulsing ? DOT_R + 2 : DOT_R;
-            tft.fillCircle(cx, cy, r + 2, theme.panel);   // clear area
-            if (i == PAGE_HOME) {
-                // Home dot: small rounded square to differentiate
-                tft.fillRoundRect(cx - r, cy - r, r * 2, r * 2, 2, theme.accent);
-                tft.drawRoundRect(cx - r - 1, cy - r - 1, r * 2 + 2, r * 2 + 2, 2, theme.gold);
-            } else {
-                tft.fillCircle(cx, cy, r, theme.accent);
-                tft.drawCircle(cx, cy, r + 1, theme.gold);    // accent glow ring
-            }
-        } else if (allowed) {
-            if (i == PAGE_HOME) {
-                tft.fillRoundRect(cx - DOT_R + 1, cy - DOT_R + 1, (DOT_R - 1) * 2, (DOT_R - 1) * 2, 2, theme.panel);
-                tft.drawRoundRect(cx - DOT_R + 1, cy - DOT_R + 1, (DOT_R - 1) * 2, (DOT_R - 1) * 2, 2, theme.textDim);
-            } else {
-                tft.drawCircle(cx, cy, DOT_R, theme.textDim); // hollow ring
-            }
-        } else {
-            tft.fillCircle(cx, cy, DOT_R, theme.panel);
-            tft.drawCircle(cx, cy, DOT_R - 1, theme.separator);
-        }
-    }
-
-    // Date string — centred between WiFi dot and page dots
-    int available = dotX - 28;
-    tft.setTextColor(theme.textPri, theme.panel);
-    int dw = tft.textWidth(dateStr);
-    int dx = 28 + (available - dw) / 2;
-    if (dx < 28) dx = 28;
-    tft.setCursor(dx, 7);
-    tft.print(dateStr);
-
-    hline(LAYOUT_STATUS_Y + LAYOUT_STATUS_H - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -703,143 +562,6 @@ static void drawWeatherIcon(int cx, int cy, const String& code) {
         // Unknown — small question mark circle
         tft.drawCircle(cx, cy, 8, theme.textDim);
     }
-}
-
-// ---------------------------------------------------------------------------
-// Hero widget (y=24..123) — merged clock + weather, side-by-side
-// ---------------------------------------------------------------------------
-static void drawHero(const struct tm& t) {
-    fillPanel(LAYOUT_HERO_Y, LAYOUT_HERO_H, theme.bg);
-
-    // Main card
-    const int cardX = 8, cardW = SCREEN_W - 16;
-    const int cardY = LAYOUT_HERO_Y + 4, cardH = LAYOUT_HERO_H - 8;
-    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
-
-    // ── Left zone: Clock (x=12..134) ──
-    // Vertically-centred time with a gold accent rule and the weekday name
-    // beneath it. The prayer countdown that used to sit here was removed —
-    // it lives in the prayer widget below.
-    const int clockZoneW = 122;
-    char hmBuf[6];
-    snprintf(hmBuf, sizeof(hmBuf), "%02d:%02d", t.tm_hour, t.tm_min);
-
-    tft.setTextColor(theme.textPri, theme.panel);
-    // Ensure clock width/layout uses a deterministic text scale.
-    tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold24pt7b);
-    int tw = tft.textWidth(hmBuf);
-    int clockX = 12 + (clockZoneW - tw) / 2;
-    if (clockX < 12) clockX = 12;
-    tft.setCursor(clockX, cardY + 48);
-    tft.print(hmBuf);
-
-    // Thin gold accent rule, as wide as the time, just below it.
-    int ruleW = tw;
-    int ruleX = 12 + (clockZoneW - ruleW) / 2;
-    if (ruleX < 12) ruleX = 12;
-    tft.drawFastHLine(ruleX, cardY + 60, ruleW, theme.gold);
-
-    // Weekday name beneath the rule.
-    static const char* const WEEKDAY[7] = {
-        "Sunday", "Monday", "Tuesday", "Wednesday",
-        "Thursday", "Friday", "Saturday"
-    };
-    const char* wd = WEEKDAY[(t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0];
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textSec, theme.panel);
-    int wdw = tft.textWidth(wd);
-    int wdx = 12 + (clockZoneW - wdw) / 2;
-    if (wdx < 12) wdx = 12;
-    tft.setCursor(wdx, cardY + 76);
-    tft.print(wd);
-
-    // ── Vertical divider ──
-    const int divX = 138;
-    tft.drawFastVLine(divX, cardY + 8, cardH - 16, theme.separator);
-
-    // ── Right zone: Weather (x=142..224) ──
-    const int rZoneX = 146;
-
-    if (!Weather::current.valid) {
-        tft.setFreeFont(nullptr);
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textDim, theme.panel);
-        if (Weather::current.fetchState == Weather::WEATHER_NO_KEY) {
-            // Friendly hint instead of error — weather is optional.
-            // The full setup URL lives on the dedicated setup screens; here
-            // we just point the user at Settings without cramming five
-            // tight lines into the ~76px hero corner.
-            tft.setTextColor(theme.textSec, theme.panel);
-            tft.setCursor(rZoneX, cardY + 26);
-            tft.print("Weather");
-            tft.setTextColor(theme.textDim, theme.panel);
-            tft.setCursor(rZoneX, cardY + 44);
-            tft.print("Add API");
-            tft.setCursor(rZoneX, cardY + 56);
-            tft.print("key in");
-            tft.setTextColor(theme.accent, theme.panel);
-            tft.setCursor(rZoneX, cardY + 70);
-            tft.print("Settings");
-        } else {
-            const char* line2 = "loading...";
-            if (Weather::current.fetchState == Weather::WEATHER_NET_ERROR) line2 = "Net error";
-            tft.setCursor(rZoneX, cardY + 28);
-            tft.print("Weather");
-            tft.setCursor(rZoneX, cardY + 40);
-            tft.print(line2);
-        }
-    } else {
-        const Weather::Data& w = Weather::current;
-        uint16_t wAccent = Weather::iconColor(w.iconCode);
-        const int wZoneW = 80;  // usable width of the right zone
-
-        // Weather icon (centered in right zone, near top)
-        int iconCx = rZoneX + wZoneW / 2;
-        int iconCy = cardY + 20;
-        drawWeatherIcon(iconCx, iconCy, w.iconCode);
-
-        // Temperature below icon
-        char tempBuf[12];
-        const char* unit = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
-        snprintf(tempBuf, sizeof(tempBuf), "%.0f°%s", w.temp, unit);
-
-        tft.setFreeFont(&FreeSansBold12pt7b);
-        tft.setTextColor(wAccent, theme.panel);
-        tw = tft.textWidth(tempBuf);
-        int tempX = rZoneX + (wZoneW - tw) / 2;
-        tft.setCursor(tempX, cardY + 50);
-        tft.print(tempBuf);
-
-        // Condition label
-        tft.setFreeFont(nullptr);
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textSec, theme.panel);
-        const char* label = Weather::iconLabel(w.iconCode);
-        int lw = tft.textWidth(label);
-        int lx = rZoneX + (wZoneW - lw) / 2;
-        tft.setCursor(lx, cardY + 62);
-        tft.print(label);
-
-        // Humidity line
-        char humBuf[12];
-        snprintf(humBuf, sizeof(humBuf), "Hum %.0f%%", w.humidity);
-        tft.setTextColor(theme.textDim, theme.panel);
-        int hw = tft.textWidth(humBuf);
-        int hx = rZoneX + (wZoneW - hw) / 2;
-        tft.setCursor(hx, cardY + 76);
-        tft.print(humBuf);
-
-        // City name
-        tft.setTextColor(theme.textDim, theme.panel);
-        int cn = tft.textWidth(w.cityName);
-        int cnx = rZoneX + (wZoneW - cn) / 2;
-        tft.setCursor(cnx, cardY + 88);
-        tft.print(w.cityName);
-    }
-
-    hline(LAYOUT_HERO_Y + LAYOUT_HERO_H - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -917,7 +639,7 @@ static void drawPrayerPanel() {
     const int availH = CARD_BOTTOM - CARD_TOP - footerH;
 
     // Adaptive row height: ensure all 6 prayers fit
-    const int ROW_H = max(22, min(30, availH / Prayer::PRAYER_COUNT));
+    const int ROW_H = max(22, min(46, availH / Prayer::PRAYER_COUNT));
     const int maxVisible = availH / ROW_H;
     const int START_Y = CARD_TOP;
 
@@ -1135,24 +857,6 @@ static void drawPanelChevrons() {
     tft.print(">");
 }
 
-// Right-aligned "tap >" disclosure hint, drawn level with a Home section
-// header to signal that tapping the section drills into its detail page.
-// Distinguished from the dim carousel chevrons by the accent colour.
-static void drawTapHint(int cardX, int cardW, int y) {
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
-    tft.setTextColor(theme.accent, theme.panel);
-    const char* hint = "tap >";
-    int hw = tft.textWidth(hint);
-    tft.setCursor(cardX + cardW - hw - 10, y);
-    tft.print(hint);
-    tft.setTextColor(theme.textDim, theme.panel);
-}
-
-// Geometry of the Home card's rotating Stocks section is recorded on each full
-// draw (see homeStockSec* above) so updateHomeStockSection() can repaint just
-// this region without flicker.
-
 // ---------------------------------------------------------------------------
 // Copy `src` into `out`, dropping trailing characters and appending an
 // ellipsis until the text fits within `maxW` pixels at the CURRENT font/size.
@@ -1184,380 +888,234 @@ static void fitTextToWidth(const char* src, int maxW, char* out, size_t outSz) {
     out[outSz - 1] = '\0';
 }
 
-// Draw Section 3 of the Home card: the rotating stock quote (Stocks::displayIndex).
-static void drawHomeStockSection(int cardX, int cardW, int yPos) {
-    homeStockSecX = cardX; homeStockSecW = cardW; homeStockSecY = yPos;
+// ===========================================================================
+// Home dashboard — full-width time/date banner + Weather | Prayer | Stocks tiles.
+// Tapping a tile opens its detail page (see handleTouch). There is no status
+// bar or hero any more, so Home owns the entire screen.
+// ===========================================================================
+static const char* const HOME_WD[7]   = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+static const char* const HOME_MON[12]  = {"Jan","Feb","Mar","Apr","May","Jun",
+                                          "Jul","Aug","Sep","Oct","Nov","Dec"};
+static String g_homeDateStr;   // full date string incl. "W##"; set by redraw()
 
+// Shared row frame: full-width rounded card for one horizontal widget.
+static void drawHomeRowCard(int rowY) {
+    tft.fillRoundRect(6, rowY + 4, SCREEN_W - 12, HOME_ROW_H - 8, 8, theme.panel);
+}
+
+// Centre a short message vertically in a row (loading / no-data states).
+static void drawHomeRowMsg(int rowY, int leftX, const char* msg) {
+    tft.setFreeFont(nullptr);
     tft.setTextSize(1);
     tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(cardX + 10, yPos);
-    tft.print("Stocks");
-    drawTapHint(cardX, cardW, yPos);
-    yPos += 12;
+    tft.setCursor(leftX, rowY + HOME_ROW_H / 2 + 3);
+    tft.print(msg);
+}
 
-    int topIdx = Stocks::displayQuoteIndex();
+// Row 1 — Time / date banner: large time (left), weekday/day/month + week
+// number (right), and a small WiFi status dot.
+static void drawHomeBanner() {
+    struct tm t; bool ok = getLocalTime(&t);
+    bool wifi = Network::isConnected();
 
-    if (topIdx < 0) {
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 4);
-        tft.print("No data");
-    } else {
-        const Stocks::Quote& q = Stocks::quotes[topIdx];
-        float mPct = Stocks::metricPct(q);
-        uint16_t pctColor = (mPct >= 0) ? theme.green : theme.red;
-        uint16_t edgeColor = pctColor;
+    tft.fillRect(0, HOME_TIME_Y, SCREEN_W, HOME_ROW_H, theme.bg);
+    drawHomeRowCard(HOME_TIME_Y);
+    const int cardY = HOME_TIME_Y + 4, cardH = HOME_ROW_H - 8;
 
-        // Edge bar
-        tft.fillRect(cardX + 6, yPos, 4, 28, edgeColor);
+    // Time (left, large)
+    char hm[6];
+    if (ok) snprintf(hm, sizeof(hm), "%02d:%02d", t.tm_hour, t.tm_min);
+    else    strncpy(hm, "--:--", sizeof(hm));
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSansBold24pt7b);
+    tft.setTextColor(theme.textPri, theme.panel);
+    tft.setCursor(14, cardY + cardH / 2 + 16);
+    tft.print(hm);
 
-        // Line 1, right: daily change ("1D") — primary, big bold figure with a
-        // small dim label. Measured first so the name knows its budget.
+    const int rightX = SCREEN_W - 12;
+
+    // Date (weekday day month), right-aligned
+    if (ok) {
+        char d1[20];
+        snprintf(d1, sizeof(d1), "%s %d %s",
+                 HOME_WD[(t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0],
+                 t.tm_mday,
+                 HOME_MON[(t.tm_mon >= 0 && t.tm_mon < 12) ? t.tm_mon : 0]);
         tft.setFreeFont(&FreeSansBold9pt7b);
-        char dBuf[16];
-        const char* arrow = (mPct >= 0) ? " +" : " ";
-        snprintf(dBuf, sizeof(dBuf), "%s%.2f%%", arrow, mPct);
-        int dW    = tft.textWidth(dBuf);
-        int dNumX = cardX + cardW - 14 - dW;
-        tft.setFreeFont(nullptr);
-        tft.setTextSize(1);
-        int d1W = tft.textWidth("1D");
-        int d1X = dNumX - d1W - 5;
-
-        // Name (left) — shrink to the small built-in font, then truncate, when
-        // the bold name would collide with the 1D figure.
-        const char* nm       = Stocks::displayName(q);
-        int         nameX    = cardX + 16;
-        int         nameMaxW = d1X - nameX - 8;
-        char        nameBuf[44];
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textPri, theme.panel);
-        if (tft.textWidth(nm) <= nameMaxW) {
-            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
-            tft.setCursor(nameX, yPos + 16);
-            tft.print(nameBuf);
-        } else {
-            tft.setFreeFont(nullptr);
-            tft.setTextSize(1);
-            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
-            tft.setCursor(nameX, yPos + 10);
-            tft.print(nameBuf);
-        }
-
-        // "1D" label + daily figure
-        tft.setFreeFont(nullptr);
-        tft.setTextSize(1);
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(d1X, yPos + 6);
-        tft.print("1D");
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(pctColor, theme.panel);
-        tft.setCursor(dNumX, yPos + 16);
-        tft.print(dBuf);
-
-        tft.setFreeFont(nullptr);
-        yPos += 20;
-
-        // Line 2, left: price.
-        char priceBuf[16];
-        if (Settings::stockEuro) {
-            snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
-        } else {
-            snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
-        }
-        tft.setTextSize(1);
         tft.setTextColor(theme.textSec, theme.panel);
-        tft.setCursor(cardX + 16, yPos + 2);
-        tft.print(priceBuf);
-
-        // Line 2, right: 52-week change ("52W") — secondary context, small.
-        // "--" when no 52-week high was reported. Reserve room for the alert dot.
-        bool  hp   = Stocks::hasPeak(q);
-        float pPct = Stocks::peakPct(q);
-        char  pBuf[12];
-        if (hp) snprintf(pBuf, sizeof(pBuf), "%+.2f%%", pPct);
-        else    snprintf(pBuf, sizeof(pBuf), "--");
-        uint16_t pCol = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
-        tft.setTextSize(1);
-        int pW    = tft.textWidth(pBuf);
-        int pRight = cardX + cardW - (q.alertTriggered ? 22 : 12);
-        int pNumX = pRight - pW;
-        int p1X   = pNumX - tft.textWidth("52W") - 4;
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(p1X, yPos + 2);
-        tft.print("52W");
-        tft.setTextColor(pCol, theme.panel);
-        tft.setCursor(pNumX, yPos + 2);
-        tft.print(pBuf);
-
-        // Alert dot (daily move beyond the alert threshold)
-        if (q.alertTriggered) {
-            tft.fillCircle(cardX + cardW - 16, yPos + 4, 3, theme.gold);
-        }
+        tft.setCursor(rightX - tft.textWidth(d1), cardY + 30);
+        tft.print(d1);
     }
+
+    // Week number, parsed from the date string ("... W24")
+    int wi = g_homeDateStr.indexOf('W');
+    if (wi >= 0) {
+        String wk = g_homeDateStr.substring(wi);
+        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setTextColor(theme.gold, theme.panel);
+        tft.setCursor(rightX - tft.textWidth(wk.c_str()), cardY + 52);
+        tft.print(wk);
+    }
+
+    // WiFi status dot — top-right corner of the card.
+    tft.fillCircle(rightX - 1, cardY + 10, 4, wifi ? theme.green : theme.red);
+
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+}
+
+// Row 2 — Weather: icon + temperature (left), condition + humidity/city (right).
+static void drawHomeWeatherTile() {
+    tft.fillRect(0, HOME_WEA_Y, SCREEN_W, HOME_ROW_H, theme.bg);
+    drawHomeRowCard(HOME_WEA_Y);
+    const int midY = HOME_WEA_Y + HOME_ROW_H / 2;
+
+    if (!Weather::current.valid) {
+        drawHomeRowMsg(HOME_WEA_Y, 18,
+            (Weather::current.fetchState == Weather::WEATHER_NO_KEY) ? "Weather: add API key" : "Weather ...");
+        return;
+    }
+    const Weather::Data& wd = Weather::current;
+    uint16_t accent = Weather::iconColor(wd.iconCode);
+
+    drawWeatherIcon(34, midY, wd.iconCode);
+
+    // Temperature — the GFX fonts have no '°' glyph, so draw the ring by hand.
+    const char* unit = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
+    char nb[8]; snprintf(nb, sizeof(nb), "%.0f", wd.temp);
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setTextColor(accent, theme.panel);
+    const int tX = 58, tBase = midY + 7;
+    tft.setCursor(tX, tBase);
+    tft.print(nb);
+    int dX = tX + tft.textWidth(nb);
+    tft.drawCircle(dX + 4, tBase - 13, 2, accent);   // degree ring
+    tft.setCursor(dX + 9, tBase);
+    tft.print(unit);
+
+    // Right block: condition (top) + humidity (bottom)
+    const int rightX = SCREEN_W - 14;
+    tft.setTextSize(1);
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextColor(theme.textSec, theme.panel);
+    const char* lbl = Weather::iconLabel(wd.iconCode);
+    tft.setCursor(rightX - tft.textWidth(lbl), midY - 6);
+    tft.print(lbl);
+
+    char hb[28];
+    snprintf(hb, sizeof(hb), "Hum %.0f%%", wd.humidity);
+    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(rightX - tft.textWidth(hb), midY + 12);
+    tft.print(hb);
+}
+
+// Row 3 — Prayer: next prayer name (left), time (centre), countdown (right).
+static void drawHomePrayerTile() {
+    tft.fillRect(0, HOME_PRA_Y, SCREEN_W, HOME_ROW_H, theme.bg);
+    drawHomeRowCard(HOME_PRA_Y);
+    const int midY = HOME_PRA_Y + HOME_ROW_H / 2;
+
+    if (!Prayer::current.valid) { drawHomeRowMsg(HOME_PRA_Y, 18, "Prayers ..."); return; }
+
+    int nextIdx = Prayer::current.nextIndex;
+    int hi = (nextIdx == 1) ? 2 : nextIdx;      // skip Sunrise
+    if (hi < 0 || hi >= Prayer::PRAYER_COUNT) hi = 0;
+    const char* name = Prayer::current.prayers[hi].name;
+    const char* tm   = Prayer::current.prayers[hi].time;
+
+    int cd = Prayer::minutesUntilNext();
+    int nowMin = -1; struct tm nt;
+    if (getLocalTime(&nt)) nowMin = nt.tm_hour * 60 + nt.tm_min;
+    if (nextIdx == 1 && nowMin >= 0)
+        cd = Prayer::toMinutes(Prayer::current.prayers[2].time) - nowMin;
+
+    // Left block: "NEXT" label + prayer name (gold)
+    tft.setTextSize(1);
+    tft.setFreeFont(nullptr);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(16, midY - 10);
+    tft.print("NEXT");
+    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setTextColor(theme.gold, theme.panel);
+    tft.setCursor(16, midY + 14);
+    tft.print(name);
+
+    // Right block: time (top) + countdown (below), both right-aligned
+    const int rightX = SCREEN_W - 14;
+    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setTextColor(theme.textPri, theme.panel);
+    tft.setCursor(rightX - tft.textWidth(tm), midY - 1);
+    tft.print(tm);
+
+    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    char cdb[20];
+    if (cd >= 0) {
+        int h = cd / 60, m = cd % 60;
+        if (h > 0) snprintf(cdb, sizeof(cdb), "in %dh %02dm", h, m);
+        else       snprintf(cdb, sizeof(cdb), "in %dm", m);
+    } else strncpy(cdb, "--", sizeof(cdb));
+    tft.setTextColor(theme.textSec, theme.panel);
+    tft.setCursor(rightX - tft.textWidth(cdb), midY + 15);
+    tft.print(cdb);
+}
+
+// Row 4 — Stocks: symbol (left), price (centre), daily change (right).
+static void drawHomeStocksTile() {
+    tft.fillRect(0, HOME_STK_Y, SCREEN_W, HOME_ROW_H, theme.bg);
+    drawHomeRowCard(HOME_STK_Y);
+    const int midY = HOME_STK_Y + HOME_ROW_H / 2;
+
+    int idx = Stocks::displayQuoteIndex();
+    if (idx < 0) { drawHomeRowMsg(HOME_STK_Y, 18, "Stocks ..."); return; }
+
+    const Stocks::Quote& q = Stocks::quotes[idx];
+    float mPct = Stocks::metricPct(q);
+    uint16_t pc = (mPct >= 0) ? theme.green : theme.red;
+
+    // Coloured edge bar at the far left signals up/down.
+    tft.fillRect(10, HOME_STK_Y + 12, 4, HOME_ROW_H - 24, pc);
+
+    // Left block: symbol / name (top) + price (below)
+    tft.setTextSize(1);
+    char nb[24];
+    tft.setFreeFont(&FreeSansBold12pt7b);
+    fitTextToWidth(Stocks::displayName(q), 140, nb, sizeof(nb));
+    tft.setTextColor(theme.textPri, theme.panel);
+    tft.setCursor(22, midY - 2);
+    tft.print(nb);
+
+    char pb[16];
+    if (Settings::stockEuro) snprintf(pb, sizeof(pb), "EUR %.2f", Stocks::euroPrice(q));
+    else                     snprintf(pb, sizeof(pb), "$%.2f", q.price);
+    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.panel);
+    tft.setCursor(22, midY + 14);
+    tft.print(pb);
+
+    // Right block: daily change, prominent and vertically centred
+    char cb[16]; snprintf(cb, sizeof(cb), "%+.2f%%", mPct);
+    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setTextColor(pc, theme.panel);
+    tft.setCursor(SCREEN_W - 14 - tft.textWidth(cb), midY + 7);
+    tft.print(cb);
 }
 
 static void drawHomePanel() {
-    fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
-    tft.setFreeFont(nullptr);
-
-    homePrayedButtonVisible = false;
-
-    const int cardX = 8, cardW = SCREEN_W - 16;
-    const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
-    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
-
-    int yPos = cardY + 6;
-
-    // 3-letter prayer abbreviations for the compact day strip.
-    auto prayerAbbrev = [](int idx) -> const char* {
-        switch (idx) {
-            case 0: return "Fjr";
-            case 1: return "Sun";
-            case 2: return "Dhr";
-            case 3: return "Asr";
-            case 4: return "Mgb";
-            case 5: return "Ish";
-            default: return "---";
-        }
-    };
-
-    // ── Section 1: Today's prayer timeline ─────────────────────────────────
-    // A horizontal strip of all six daily prayers (state-coloured dots + times),
-    // a Fajr→Isha day-progress bar, and a prayed/missed summary. Tapping this
-    // region drills into the full prayer list. The next-prayer countdown lives
-    // only in the hero, so it isn't repeated here.
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(cardX + 10, yPos);
-    tft.print("Today's prayers");
-    drawTapHint(cardX, cardW, yPos);
-    yPos += 14;
-
-    const int nextIdx = Prayer::current.valid ? Prayer::current.nextIndex : -1;
-
-    if (!Prayer::current.valid) {
-        tft.setTextSize(2);
-        tft.setTextColor(theme.textDim, theme.panel);
-        tft.setCursor(cardX + 10, yPos + 6);
-        tft.print("Loading...");
-        yPos += 34;
-    } else {
-        // Show the five daily prayers; Sunrise (index 1) is omitted so each
-        // remaining prayer gets a wider column.
-        static const int dispIdx[5] = {0, 2, 3, 4, 5};
-        const int DISP_COUNT = 5;
-        // If the next event is Sunrise, emphasise the following prayer (Dhuhr)
-        // instead so the strip/countdown always points at a real prayer.
-        const int highlightIdx = (nextIdx == 1) ? 2 : nextIdx;
-
-        const int stripX = cardX + 6;
-        const int stripW = cardW - 12;
-        const int colW   = stripW / DISP_COUNT;
-        const int stripY = yPos;
-
-        for (int d = 0; d < DISP_COUNT; d++) {
-            int i = dispIdx[d];
-            Prayer::RowState st = Prayer::rowStateForIndex(i);
-            int colX = stripX + d * colW;
-            int cx   = colX + colW / 2;
-            bool isNext = (i == highlightIdx);
-
-            // Highlight the next prayer's column so it pops out of the row.
-            uint16_t colBg = theme.panel;
-            if (isNext) {
-                tft.fillRoundRect(colX + 1, stripY - 2, colW - 2, 32, 4, theme.highlightBg);
-                colBg = theme.highlightBg;
-            }
-
-            uint16_t labelCol = isNext ? theme.gold : theme.textDim;
-            uint16_t timeCol  = isNext ? theme.gold : theme.textSec;
-
-            // Abbreviated name (top of column)
-            tft.setTextSize(1);
-            tft.setTextColor(labelCol, colBg);
-            const char* ab = prayerAbbrev(i);
-            int aw = tft.textWidth(ab);
-            tft.setCursor(cx - aw / 2, stripY);
-            tft.print(ab);
-
-            // State marker dot (middle of column)
-            int dotY = stripY + 14;
-            switch (st) {
-                case Prayer::ROW_DONE:
-                    tft.fillCircle(cx, dotY, 4, theme.green);
-                    break;
-                case Prayer::ROW_MISSED:
-                    tft.fillCircle(cx, dotY, 4, theme.red);
-                    break;
-                case Prayer::ROW_PENDING:
-                    tft.fillCircle(cx, dotY, 4, theme.accent);
-                    tft.drawCircle(cx, dotY, 5, theme.gold);
-                    break;
-                case Prayer::ROW_SNOOZED:
-                    tft.drawCircle(cx, dotY, 4, theme.textSec);
-                    tft.fillCircle(cx, dotY, 2, theme.textSec);
-                    break;
-                default:
-                    if (isNext) {
-                        tft.fillCircle(cx, dotY, 4, theme.gold);
-                        tft.drawCircle(cx, dotY, 6, theme.gold);
-                    } else {
-                        tft.drawCircle(cx, dotY, 3, theme.textDim);
-                    }
-                    break;
-            }
-
-            // Time (bottom of column)
-            tft.setTextColor(timeCol, colBg);
-            const char* tm = Prayer::current.prayers[i].time;
-            int twv = tft.textWidth(tm);
-            tft.setCursor(cx - twv / 2, stripY + 22);
-            tft.print(tm);
-        }
-        yPos = stripY + 32;
-
-        // Current local time in minutes (for the countdown + progress fill).
-        int nowMin = -1;
-        struct tm nt;
-        if (getLocalTime(&nt)) nowMin = nt.tm_hour * 60 + nt.tm_min;
-        int ishaMin = Prayer::toMinutes(Prayer::current.prayers[5].time);
-
-        // ── Summary line: prayed count (left) · missed count (right) ──
-        int doneCount = 0;
-        for (int i = 0; i < Prayer::PRAYER_COUNT; i++) {
-            if (i == 1) continue;  // Sunrise is not a prayer
-            if (Prayer::rowStateForIndex(i) == Prayer::ROW_DONE) doneCount++;
-        }
-        tft.setTextSize(1);
-        char leftBuf[16];
-        snprintf(leftBuf, sizeof(leftBuf), "%d prayed", doneCount);
-        tft.setTextColor(theme.green, theme.panel);
-        tft.setCursor(cardX + 12, yPos);
-        tft.print(leftBuf);
-
-        int missed = Prayer::missedCount();
-        if (missed > 0) {
-            char missBuf[16];
-            snprintf(missBuf, sizeof(missBuf), "%d missed", missed);
-            int rw = tft.textWidth(missBuf);
-            tft.setTextColor(theme.red, theme.panel);
-            tft.setCursor(cardX + cardW - rw - 12, yPos);
-            tft.print(missBuf);
-        }
-        yPos += 13;
-
-        // ── Countdown chip ─────────────────────────────────────────────────
-        // Design A fused with the progress bar: the chip body IS the bar — it
-        // fills from the previous prayer to the next one — with a gold edge,
-        // clock glyph, prayer name (left) and remaining time (right) overlaid.
-        int cdMin = Prayer::minutesUntilNext();
-        if (nextIdx == 1 && nowMin >= 0) {
-            // Fajr→Sunrise window: count to Dhuhr rather than Sunrise.
-            cdMin = Prayer::toMinutes(Prayer::current.prayers[2].time) - nowMin;
-        }
-        if (highlightIdx >= 0 && cdMin >= 0 && nowMin >= 0) {
-            // Fraction elapsed from the previous prayer to the next one.
-            int nextMin = Prayer::toMinutes(Prayer::current.prayers[highlightIdx].time);
-            int prevMin = -100000;
-            for (int j = 0; j < Prayer::PRAYER_COUNT; j++) {
-                int pm = Prayer::toMinutes(Prayer::current.prayers[j].time);
-                if (pm <= nowMin && pm > prevMin) prevMin = pm;
-            }
-            if (prevMin == -100000) prevMin = ishaMin - 1440;   // before Fajr today
-            int adjNext = nextMin;
-            if (adjNext <= prevMin) adjNext += 1440;             // wraps past midnight
-            float frac = 0.0f;
-            if (adjNext > prevMin) frac = (float)(nowMin - prevMin) / (float)(adjNext - prevMin);
-            if (frac < 0.0f) frac = 0.0f;
-            if (frac > 1.0f) frac = 1.0f;
-
-            bool urgent = (cdMin < 5);
-            uint16_t fillCol = urgent ? theme.accent : theme.green;
-            uint16_t timeCol = urgent ? theme.textPri : theme.gold;
-
-            const int chipX = cardX + 10, chipW = cardW - 20, chipH = 24;
-            const int chipY = yPos;
-
-            // Track, then progress fill, then the gold left edge bar.
-            tft.fillRoundRect(chipX, chipY, chipW, chipH, 5, theme.separator);
-            int fillW = (int)((chipW - 4) * frac);
-            if (fillW > 0) tft.fillRect(chipX + 4, chipY + 1, fillW, chipH - 2, fillCol);
-            tft.fillRect(chipX, chipY, 4, chipH, theme.gold);
-
-            // Clock glyph (gold) near the left.
-            int gx = chipX + 16, gy = chipY + chipH / 2;
-            tft.drawCircle(gx, gy, 6, theme.gold);
-            tft.drawCircle(gx, gy, 5, theme.gold);
-            tft.drawLine(gx, gy, gx, gy - 4, theme.gold);
-            tft.drawLine(gx, gy, gx + 3, gy + 1, theme.gold);
-
-            // Prayer name (left) — transparent bg so it sits over the fill.
-            tft.setFreeFont(&FreeSansBold9pt7b);
-            tft.setTextColor(theme.textPri);
-            tft.setCursor(gx + 12, chipY + chipH - 7);
-            tft.print(Prayer::current.prayers[highlightIdx].name);
-
-            // Remaining time (right) — bold.
-            char cdBuf[16];
-            int ch = cdMin / 60, cm = cdMin % 60;
-            if (ch > 0) snprintf(cdBuf, sizeof(cdBuf), "%dh %02dm", ch, cm);
-            else        snprintf(cdBuf, sizeof(cdBuf), "%dm", cm);
-            tft.setTextColor(timeCol);
-            int cw = tft.textWidth(cdBuf);
-            tft.setCursor(chipX + chipW - cw - 8, chipY + chipH - 7);
-            tft.print(cdBuf);
-
-            tft.setFreeFont(nullptr);
-            tft.setTextSize(1);
-            yPos += chipH + 4;
-        } else {
-            yPos += 2;
-        }
-
-        // ── "Prayed" quick-action button when the current prayer is due ──
-        int curIdx = Prayer::currentOrLastPrayerIndex();
-        if (curIdx >= 0 && Prayer::rowStateForIndex(curIdx) == Prayer::ROW_PENDING) {
-            yPos += 2;
-            int btnW = 80, btnH = 22;
-            int btnX = cardX + (cardW - btnW) / 2;
-            tft.fillRoundRect(btnX, yPos, btnW, btnH, 6, theme.green);
-            tft.setTextSize(1);
-            tft.setTextColor(theme.textPri, theme.green);
-            const char* pLabel = "Prayed";
-            int plw = tft.textWidth(pLabel);
-            tft.setCursor(btnX + (btnW - plw) / 2, yPos + 7);
-            tft.print(pLabel);
-            homePrayedButtonVisible = true;
-            homePrayedButtonY = yPos;
-            yPos += btnH + 4;
-        }
-    }
-
-    // ── Separator ──────────────────────────────────────────────────────────
-    tft.drawFastHLine(cardX + 16, yPos + 2, cardW - 32, theme.separator);
-    yPos += 10;
-
-    // ── Section 2: Stocks (rotates through all symbols) ────────────────────
-    drawHomeStockSection(cardX, cardW, yPos);
-
-    drawPanelChevrons();
-
-    // Reset text state
+    fillPanel(0, SCREEN_H, theme.bg);
+    drawHomeBanner();
+    drawHomeWeatherTile();
+    drawHomePrayerTile();
+    drawHomeStocksTile();
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
 
-// Repaint just the rotating Stocks section of the Home card. Called on the
-// rotation tick so the symbol cycles without redrawing (and flickering) the
-// whole panel. Falls back to nothing if Home isn't the active page.
+// Repaint just the rotating Stocks tile on the rotation tick (no full redraw).
 static void updateHomeStockSection() {
-    if (activePage != PAGE_HOME || azanScreenActive || homeStockSecY < 0) return;
-    // Clear the section's region (mid-card, clear of the rounded corners) and
-    // redraw it, then re-stamp the chevrons in case the clear overlapped them.
-    tft.fillRect(homeStockSecX + 2, homeStockSecY - 2, homeStockSecW - 4, 58, theme.panel);
-    drawHomeStockSection(homeStockSecX, homeStockSecW, homeStockSecY);
-    drawPanelChevrons();
+    if (activePage != PAGE_HOME || azanScreenActive) return;
+    drawHomeStocksTile();
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
@@ -1771,21 +1329,35 @@ static void drawForecastPanel() {
     tft.setCursor(cardX + (cardW - hw) / 2, cardY + 4);
     tft.print(hdr);
 
-    const int ROW_H   = 34;
     const int START_Y  = cardY + 16;
     const char* unit   = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
+
+    // Count the days we'll actually draw so the rows can be stretched to fill
+    // the full-height panel (the hero no longer sits above us).
+    int dayRows = 0;
+    for (int i = 0; i < Weather::forecast.dayCount && dayRows < FORECAST_DAYS; i++) {
+        if (Weather::forecast.days[i].valid) dayRows++;
+    }
+    if (dayRows < 1) dayRows = 1;
+
+    // Adaptive row height: divide the available card height among the rows,
+    // clamped so rows never get cramped (32) or absurdly tall (60).
+    const int availH = (cardY + cardH - 6) - START_Y;
+    const int ROW_H  = max(32, min(60, availH / dayRows));
+    const int vpad   = (ROW_H - 34) / 2;   // centre the 34px content block
     int shown = 0;
 
     for (int i = 0; i < Weather::forecast.dayCount && shown < FORECAST_DAYS; i++) {
         const Weather::DayForecast& d = Weather::forecast.days[i];
         if (!d.valid) continue;
 
-        int ry = START_Y + shown * ROW_H;
+        int ry = START_Y + shown * ROW_H;   // slot top
+        int cy = ry + vpad;                  // centred content top
         uint16_t rowBg = theme.panel;
         uint16_t accent = Weather::iconColor(d.iconCode);
 
-        // Left edge bar (5px) coloured by weather condition
-        tft.fillRect(cardX + 6, ry, 5, ROW_H - 4, accent);
+        // Left edge bar (5px) coloured by weather condition — fills the slot
+        tft.fillRect(cardX + 6, ry + 2, 5, ROW_H - 6, accent);
 
         // Weather icon (24×24) — centered vertically in the row
         int iconCx = cardX + 30;
@@ -1796,13 +1368,13 @@ static void drawForecastPanel() {
         tft.setFreeFont(nullptr);
         tft.setTextSize(2);
         tft.setTextColor(theme.textPri, rowBg);
-        tft.setCursor(cardX + 50, ry + 2);
+        tft.setCursor(cardX + 50, cy + 2);
         tft.print(d.dayName);
 
         // Condition label below day name
         tft.setTextSize(1);
         tft.setTextColor(theme.textSec, rowBg);
-        tft.setCursor(cardX + 50, ry + 20);
+        tft.setCursor(cardX + 50, cy + 20);
         tft.print(Weather::iconLabel(d.iconCode));
 
         // Hi / Lo temps — right-aligned
@@ -1814,18 +1386,18 @@ static void drawForecastPanel() {
         tft.setTextSize(2);
         tft.setTextColor(accent, rowBg);
         int hiW = tft.textWidth(hiBuf);
-        tft.setCursor(cardX + cardW - hiW - 12, ry + 2);
+        tft.setCursor(cardX + cardW - hiW - 12, cy + 2);
         tft.print(hiBuf);
 
         // Lo temp in dim colour, smaller
         tft.setTextSize(1);
         tft.setTextColor(theme.textDim, rowBg);
         int loW = tft.textWidth(loBuf);
-        tft.setCursor(cardX + cardW - loW - 12, ry + 22);
+        tft.setCursor(cardX + cardW - loW - 12, cy + 22);
         tft.print(loBuf);
 
         // Separator line between rows
-        if (shown < Weather::forecast.dayCount - 1) {
+        if (shown < dayRows - 1) {
             tft.drawFastHLine(cardX + 16, ry + ROW_H - 2, cardW - 32, theme.separator);
         }
         shown++;
@@ -1858,7 +1430,6 @@ static void drawStocksPanel() {
 
     tft.fillRoundRect(8, LAYOUT_PANEL_Y + 8, SCREEN_W - 16, LAYOUT_PANEL_H - 16, 12, theme.panel);
 
-    const int ROW_H  = 32;
     const int START_Y = LAYOUT_PANEL_Y + 14;
     int order[MAX_STOCKS];
     int orderCount = 0;
@@ -1887,13 +1458,21 @@ static void drawStocksPanel() {
         order[j + 1] = key;
     }
 
+    // Adaptive row height: stretch up to 5 rows across the full-height panel
+    // (the hero no longer sits above us), clamped so rows stay readable.
+    const int nRows      = max(1, min(orderCount, 5));
+    const int cardBottom = LAYOUT_PANEL_Y + LAYOUT_PANEL_H - 10;
+    const int ROW_H      = max(32, min(64, (cardBottom - START_Y) / nRows));
+    const int vpad       = (ROW_H - 32) / 2;   // centre the 32px content block
+
     int shown = 0;
 
     for (int oi = 0; oi < orderCount && shown < 5; oi++) {
         int i = order[oi];
         const Stocks::Quote& q = Stocks::quotes[i];
 
-        int ry = START_Y + shown * ROW_H;
+        int ry = START_Y + shown * ROW_H;   // slot top
+        int cy = ry + vpad;                 // centred content top
         uint16_t rowBg = theme.panel;   // uniform bg — no zebra
         uint16_t edgeColor = theme.separator;
 
@@ -1909,7 +1488,7 @@ static void drawStocksPanel() {
             tft.setTextSize(2);
             // Symbol in the alert colour when it needs fixing, dim otherwise.
             tft.setTextColor(badSym ? theme.gold : theme.textDim, rowBg);
-            tft.setCursor(26, ry + 8);
+            tft.setCursor(26, cy + 8);
             tft.print(Settings::stockSymbols[i]);
 
             if (badSym) {
@@ -1918,11 +1497,11 @@ static void drawStocksPanel() {
                 tft.setTextColor(theme.red, rowBg);
                 const char* msg = "CHECK SYMBOL";
                 int mw = tft.textWidth(msg);
-                tft.setCursor(SCREEN_W - mw - 24, ry + 12);
+                tft.setCursor(SCREEN_W - mw - 24, cy + 12);
                 tft.print(msg);
             } else {
                 tft.setTextColor(theme.textDim, rowBg);
-                tft.setCursor(154, ry + 8);
+                tft.setCursor(154, cy + 8);
                 tft.print("...");
             }
         } else {
@@ -1945,11 +1524,11 @@ static void drawStocksPanel() {
             int         nameX    = 26;
             int         nameMaxW = d1X - nameX - 8;
             char        nameBuf[44];
-            int         nameY    = ry + 2;
+            int         nameY    = cy + 2;
             tft.setTextSize(2);
             if (tft.textWidth(nm) > nameMaxW) {
                 tft.setTextSize(1);   // shrink before resorting to truncation
-                nameY = ry + 6;
+                nameY = cy + 6;
             }
             fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
             tft.setTextColor(theme.textPri, rowBg);
@@ -1959,11 +1538,11 @@ static void drawStocksPanel() {
             // "1D" label + daily figure
             tft.setTextSize(1);
             tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(d1X, ry + 7);
+            tft.setCursor(d1X, cy + 7);
             tft.print("1D");
             tft.setTextSize(2);
             tft.setTextColor(dCol, rowBg);
-            tft.setCursor(dNumX, ry + 2);
+            tft.setCursor(dNumX, cy + 2);
             tft.print(dBuf);
 
             // Row 2, left: price — secondary context.
@@ -1975,7 +1554,7 @@ static void drawStocksPanel() {
             }
             tft.setTextSize(1);
             tft.setTextColor(theme.textSec, rowBg);
-            tft.setCursor(26, ry + 21);
+            tft.setCursor(26, cy + 21);
             tft.print(priceBuf);
 
             // Row 2, right: 52-week change ("52W"), small. "--" when no
@@ -1991,15 +1570,15 @@ static void drawStocksPanel() {
             int pNumX = SCREEN_W - 24 - pW;
             int p1X   = pNumX - tft.textWidth("52W") - 5;
             tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(p1X, ry + 21);
+            tft.setCursor(p1X, cy + 21);
             tft.print("52W");
             tft.setTextColor(pCol, rowBg);
-            tft.setCursor(pNumX, ry + 21);
+            tft.setCursor(pNumX, cy + 21);
             tft.print(pBuf);
 
             // Alert dot — in the right margin, clear of both figures.
             if (q.alertTriggered) {
-                tft.fillCircle(SCREEN_W - 12, ry + 16, 3, theme.gold);
+                tft.fillCircle(SCREEN_W - 12, cy + 16, 3, theme.gold);
             }
         }
 
@@ -2265,9 +1844,10 @@ static void redraw(bool wifiOk, const String& ipAddr,
 
     // Safety net: keep panel page state valid across AP/STA transitions.
     coerceAllowedActivePage();
+    updatePanelLayout();
 
-    drawStatusBar(wifiOk, dateStr, ipAddr);
-    drawHero(t);
+    // Stash the full date string so the Home banner can show the week number.
+    g_homeDateStr = dateStr;
 
     switch (activePage) {
         case PAGE_HOME:     drawHomePanel();     break;
@@ -2285,20 +1865,32 @@ static void redraw(bool wifiOk, const String& ipAddr,
 // Partial updates
 // ---------------------------------------------------------------------------
 static void updateClock(const struct tm& t) {
+    (void)t;
     if (azanScreenActive) {
         // Only update animated elements, not the full Azan screen
         updateAzanAnimation();
         return;
     }
-    drawHero(t);
+    // The clock lives in the Home banner. Refresh it plus the prayer tile so the
+    // countdown stays current — both cheap, no full-screen flicker.
+    if (activePage == PAGE_HOME) {
+        drawHomeBanner();
+        drawHomePrayerTile();
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+    }
 }
 
 static void updateWeather() {
     if (azanScreenActive) return;
-    // Weather is part of the hero widget now; needs time for clock portion
-    struct tm t;
-    if (getLocalTime(&t)) {
-        drawHero(t);
+    if (activePage == PAGE_HOME) {
+        drawHomeWeatherTile();
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(1);
+    } else if (activePage == PAGE_FORECAST) {
+        // Refresh the full-screen forecast panel.
+        updatePanelLayout();
+        drawForecastPanel();
     }
 }
 
@@ -2308,6 +1900,7 @@ static void updatePanel() {
         return;
     }
     coerceAllowedActivePage();
+    updatePanelLayout();
     switch (activePage) {
         case PAGE_HOME:     drawHomePanel();     break;
         case PAGE_PRAYER:   drawPrayerPanel();   break;
@@ -2320,33 +1913,92 @@ static void updatePanel() {
 // ---------------------------------------------------------------------------
 // Splash / boot screen
 // ---------------------------------------------------------------------------
+// Boot-progress vertical anchors (kept in one place so showSplash reserves the
+// exact band that showSplashStatus repaints).
+#define SPLASH_DOTS_Y    238
+#define SPLASH_STATUS_Y  258
+
 static void showSplash() {
     tft.fillScreen(theme.bg);
-    tft.fillRoundRect(20, 96, SCREEN_W - 40, 116, 18, theme.panel);
+    const int cx = SCREEN_W / 2;
+
+    // ── Logo badge: a clock face inside a rounded tile, echoing the home tiles ──
+    const int badge = 78;
+    const int bx = cx - badge / 2, by = 48;
+    tft.fillRoundRect(bx, by, badge, badge, 16, theme.panel);
+    tft.drawRoundRect(bx, by, badge, badge, 16, theme.accent);
+    tft.drawRoundRect(bx + 1, by + 1, badge - 2, badge - 2, 15, theme.accent);
+
+    const int fcx = cx, fcy = by + badge / 2, fr = 27;
+    tft.fillCircle(fcx, fcy, fr, theme.bg);
+    tft.drawCircle(fcx, fcy, fr, theme.gold);
+    tft.drawCircle(fcx, fcy, fr - 1, theme.gold);
+
+    // Hour ticks at 12 / 3 / 6 / 9
+    tft.fillCircle(fcx, fcy - (fr - 6), 2, theme.textDim);
+    tft.fillCircle(fcx, fcy + (fr - 6), 2, theme.textDim);
+    tft.fillCircle(fcx - (fr - 6), fcy, 2, theme.textDim);
+    tft.fillCircle(fcx + (fr - 6), fcy, 2, theme.textDim);
+
+    // Hands set to a pleasant ~10:08, drawn doubled for weight
+    tft.drawLine(fcx, fcy, fcx + 14, fcy - 8, theme.textPri);   // minute
+    tft.drawLine(fcx, fcy, fcx + 15, fcy - 9, theme.textPri);
+    tft.drawLine(fcx, fcy, fcx - 11, fcy - 7, theme.textPri);   // hour
+    tft.drawLine(fcx, fcy, fcx - 11, fcy - 6, theme.textPri);
+    tft.fillCircle(fcx, fcy, 3, theme.gold);
+
+    // ── Wordmark ──
     tft.setTextSize(1);
     tft.setFreeFont(&FreeSansBold18pt7b);
-    tft.setTextColor(theme.accent, theme.panel);
+    tft.setTextColor(theme.accent, theme.bg);
     String title = "DeskNexus";
     int tw = tft.textWidth(title);
-    tft.setCursor((SCREEN_W - tw) / 2, 140);
+    tft.setCursor(cx - tw / 2, 172);
     tft.print(title);
 
+    // ── Subtitle (letter-spaced for a logotype feel) ──
     tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textSec, theme.panel);
-    String sub = "Smart Desk Clock";
-    tw = tft.textWidth(sub);
-    tft.setCursor((SCREEN_W - tw) / 2, 160);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textSec, theme.bg);
+    const char* sub = "S M A R T   D E S K   C L O C K";
+    tft.setCursor(cx - tft.textWidth(sub) / 2, 188);
     tft.print(sub);
+
+    // Gold accent rule
+    tft.drawFastHLine(cx - 58, 204, 116, theme.gold);
+
+    // Version, bottom
+    tft.setTextColor(theme.textDim, theme.bg);
+    const char* ver = "v1.0";
+    tft.setCursor(cx - tft.textWidth(ver) / 2, 302);
+    tft.print(ver);
 }
 
 static void showSplashStatus(const char* msg) {
-    tft.fillRect(24, 186, SCREEN_W - 48, 24, theme.panel);
+    const int cx = SCREEN_W / 2;
+
+    // Progress dots — the active one advances on every boot step.
+    static int step = 0;
+    const int dots = 4, gap = 16, r = 3;
+    int dx = cx - ((dots - 1) * gap) / 2;
+    tft.fillRect(0, SPLASH_DOTS_Y - r - 1, SCREEN_W, (r + 1) * 2 + 2, theme.bg);
+    for (int i = 0; i < dots; i++) {
+        int ccx = dx + i * gap;
+        if (i == (step % dots)) {
+            tft.fillCircle(ccx, SPLASH_DOTS_Y, r, theme.accent);
+            tft.drawCircle(ccx, SPLASH_DOTS_Y, r + 1, theme.gold);
+        } else {
+            tft.fillCircle(ccx, SPLASH_DOTS_Y, r - 1, theme.textDim);
+        }
+    }
+    step++;
+
+    // Status message
+    tft.fillRect(0, SPLASH_STATUS_Y, SCREEN_W, 22, theme.bg);
     tft.setFreeFont(nullptr);
     tft.setTextSize(2);
-    tft.setTextColor(theme.textSec, theme.panel);
-    int tw = tft.textWidth(msg);
-    tft.setCursor((SCREEN_W - tw) / 2, 190);
+    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setCursor(cx - tft.textWidth(msg) / 2, SPLASH_STATUS_Y + 4);
     tft.print(msg);
 }
 
