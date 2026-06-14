@@ -733,6 +733,8 @@ static String settingsPage() {
     )rawhtml";
 
     html += R"rawhtml(
+    </details>
+
     <input type="submit" value="Save Settings">
   </form>
 

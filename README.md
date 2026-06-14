@@ -12,7 +12,7 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 | **Clock** | Large HH:MM display; NTP-synced |
 | **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
 | **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
-| **Stocks** | Live quotes for up to 5 symbols via Yahoo Finance (no API key required); shows the company/fund name with both the daily (1D) and 52-week (52W) change |
+| **Stocks** | Live quotes for up to 5 symbols via Yahoo Finance (no API key required); shows a concise company/fund name (generic ETF/issuer boilerplate such as "iShares", "MSCI", "UCITS", "ETF", "USD" is stripped) with both the daily (1D) and 52-week (52W) change. The Home markets band shows the top mover; the Stocks page lists all symbols |
 | **Notifications** | On-screen banner when a stock moves ≥ 2 %, a prayer is approaching, or a break reminder is due |
 | **Break Reminder** | Configurable periodic reminder to take a break (default every 60 min) |
 | **WiFi** | Hybrid: connects to saved network; falls back to AP captive-portal if unavailable |
@@ -227,8 +227,8 @@ negative/down.
 │ ▰▰▰▰▰▰▱▱▱▱                  │ ← elapsed-progress bar to next prayer
 ├────────────────────────────┤ ~y=228
 │ MARKETS                    │
-│ ▏ S&P 500          +1.24%   │ ← top-moving stock · daily change
-│ ▏ $5,431.60                │
+│ ▏ S&P 500          +1.24%   │ ← top-moving stock · daily change (1D)
+│ ▏ $5,431.60      52W +18.0% │   price · 52-week change (52W)
 └────────────────────────────┘ y=320
 ```
 

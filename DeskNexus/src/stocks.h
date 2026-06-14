@@ -208,6 +208,83 @@ static const char* displayName(const Quote& q) {
 }
 
 // ---------------------------------------------------------------------------
+// Strip generic fund/issuer boilerplate from a company or ETF name so both the
+// device and the web portal show a concise label — works for any symbol, not
+// just specific ones. Drops issuer brands (iShares, Vanguard, SPDR…), index &
+// wrapper words (MSCI, FTSE, UCITS, ETF, ETC, Fund, Index…), currency and
+// share-class tokens (USD, EUR, Acc, Dist…), corporate suffixes (Corp, Inc,
+// Ltd, plc, AG…), and parenthetical notes like "(Dist)". Token matching is
+// whole-word and case-insensitive; punctuation (dots, apostrophes) is ignored
+// when matching so "Corp." and "Co." are caught. Falls back to the original
+// name if cleaning would remove everything (e.g. "Vanguard" on its own).
+static void cleanCompanyName(const char* src, char* dst, size_t dstSz) {
+    if (!dst || dstSz == 0) return;
+    // Pure ETF-brand issuers only — names that are also listed companies
+    // (HSBC, UBS, Invesco, Franklin) are deliberately NOT stripped.
+    static const char* const STOP[] = {
+        "ishares","ishare","vanguard","spdr","xtrackers","lyxor","amundi","wisdomtree",
+        "msci","ftse","stoxx","solactive","bloomberg","ucits","etf","etc","etp","etn",
+        "fund","index","trust","plc","sicav",
+        "usd","eur","gbp","gbx","chf","jpy","cad","aud","hkd",
+        "acc","dist","dis","hedged",
+        "corp","inc","ltd","limited","incorporated","ag","sa","nv","co","spa",
+    };
+    const size_t STOPN = sizeof(STOP) / sizeof(STOP[0]);
+
+    // Copy source with parenthetical/bracketed groups removed.
+    char buf[96];
+    size_t bi = 0; int depth = 0;
+    for (const char* p = src; *p && bi < sizeof(buf) - 1; ++p) {
+        if (*p == '(' || *p == '[') { depth++; continue; }
+        if (*p == ')' || *p == ']') { if (depth > 0) depth--; continue; }
+        if (depth == 0) buf[bi++] = *p;
+    }
+    buf[bi] = '\0';
+
+    size_t di = 0;
+    bool first = true;
+    const char* p = buf;
+    while (*p) {
+        while (*p == ' ' || *p == '\t' || *p == ',') ++p;   // skip separators
+        if (!*p) break;
+        char tok[48];
+        size_t ti = 0;
+        while (*p && *p != ' ' && *p != '\t' && *p != ',' && ti < sizeof(tok) - 1)
+            tok[ti++] = *p++;
+        tok[ti] = '\0';
+
+        // Lower-case comparison key with dots/apostrophes removed.
+        char low[48]; size_t li = 0;
+        for (size_t k = 0; k < ti; ++k) {
+            char c = tok[k];
+            if (c == '.' || c == '\'') continue;
+            low[li++] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+        }
+        low[li] = '\0';
+        if (li == 0) continue;
+
+        bool drop = false;
+        for (size_t s = 0; s < STOPN; ++s)
+            if (strcmp(low, STOP[s]) == 0) { drop = true; break; }
+        if (drop) continue;
+
+        // Trim trailing '.'/',' from the kept token before appending.
+        while (ti > 0 && (tok[ti - 1] == '.' || tok[ti - 1] == ',')) tok[--ti] = '\0';
+        if (ti == 0) continue;
+
+        if (!first && di < dstSz - 1) dst[di++] = ' ';
+        for (size_t k = 0; k < ti && di < dstSz - 1; ++k) dst[di++] = tok[k];
+        first = false;
+    }
+    dst[di] = '\0';
+
+    if (di == 0) {            // everything stripped — keep the original
+        strncpy(dst, src, dstSz - 1);
+        dst[dstSz - 1] = '\0';
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Fetch one quote (blocking). Returns true on success.
 // Call from loop() via shouldFetchNext().
 // ---------------------------------------------------------------------------
@@ -307,13 +384,14 @@ static bool fetchOne(int idx) {
     quote.prevFetchPrice = quote.valid ? quote.price : 0.0f;  // capture before overwrite
     strncpy(quote.symbol, sym, sizeof(quote.symbol) - 1);
 
-    // Prefer the concise shortName (e.g. "Apple Inc."); fall back to longName.
-    // Leave name empty when neither is present so displayName() shows the symbol.
-    const char* nm = result["meta"]["shortName"] | (const char*)nullptr;
-    if (!nm || nm[0] == '\0') nm = result["meta"]["longName"] | (const char*)nullptr;
+    // Prefer the proper longName (e.g. "iShares Physical Gold ETC") — Yahoo's
+    // shortName is often a truncated, upper-cased issuer string for London /
+    // European ETFs (e.g. "ISHARES PHYSICAL METALS PLC ISH"). Fall back to
+    // shortName, then leave empty so displayName() shows the symbol.
+    const char* nm = result["meta"]["longName"] | (const char*)nullptr;
+    if (!nm || nm[0] == '\0') nm = result["meta"]["shortName"] | (const char*)nullptr;
     if (nm && nm[0] != '\0') {
-        strncpy(quote.name, nm, sizeof(quote.name) - 1);
-        quote.name[sizeof(quote.name) - 1] = '\0';
+        cleanCompanyName(nm, quote.name, sizeof(quote.name));
     }
 
     quote.price     = price;

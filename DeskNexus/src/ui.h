@@ -1062,16 +1062,15 @@ static void drawHomePrayerTile() {
     // Label
     drawHomeLabel(HOME_PAD, top, "NEXT PRAYER", theme.accent);
 
-    // Name (left, large) + time (right, aligned to name baseline).
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    // Name (left) + time (right), on a shared baseline well below the label.
+    tft.setFreeFont(&FreeSansBold12pt7b);
     tft.setTextSize(1);
     tft.setTextColor(theme.textPri, theme.bg);
-    tft.setCursor(HOME_PAD - 1, top + 32);
+    tft.setCursor(HOME_PAD - 1, top + 34);
     tft.print(name);
 
-    tft.setFreeFont(&FreeSansBold12pt7b);
     tft.setTextColor(theme.textSec, theme.bg);
-    tft.setCursor(rightX - tft.textWidth(tm), top + 30);
+    tft.setCursor(rightX - tft.textWidth(tm), top + 34);
     tft.print(tm);
 
     // Countdown (left, below name).
@@ -1083,12 +1082,12 @@ static void drawHomePrayerTile() {
         else       snprintf(cdb, sizeof(cdb), "in %dm", m);
     } else strncpy(cdb, "--", sizeof(cdb));
     tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(HOME_PAD, top + 50);
+    tft.setCursor(HOME_PAD, top + 52);
     tft.print(cdb);
 
     // Progress bar — fraction of the gap to the next prayer already elapsed.
     const int barX = HOME_PAD, barW = SCREEN_W - 2 * HOME_PAD;
-    const int barY = top + 60, barH = 4;
+    const int barY = top + 66, barH = 4;
     tft.fillRoundRect(barX, barY, barW, barH, 2, theme.separator);
     int prevIdx = (hi - 1 + Prayer::PRAYER_COUNT) % Prayer::PRAYER_COUNT;
     int prevMin = Prayer::toMinutes(Prayer::current.prayers[prevIdx].time);
@@ -1119,7 +1118,7 @@ static void drawHomeStocksTile() {
     float mPct = Stocks::metricPct(q);
     uint16_t pc = (mPct >= 0) ? theme.green : theme.red;
 
-    const int rowY = top + 14;
+    const int rowY = top + 20;
 
     // Coloured rail at the left signals up/down.
     tft.fillRect(HOME_PAD, rowY, 4, 34, pc);
@@ -1127,9 +1126,9 @@ static void drawHomeStocksTile() {
     // Left block: name (top) + price (below).
     const int nameX = HOME_PAD + 12;
     char nb[24];
-    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setFreeFont(&FreeSansBold9pt7b);
     tft.setTextSize(1);
-    fitTextToWidth(Stocks::displayName(q), 130, nb, sizeof(nb));
+    fitTextToWidth(Stocks::displayName(q), 120, nb, sizeof(nb));
     tft.setTextColor(theme.textPri, theme.bg);
     tft.setCursor(nameX, rowY + 14);
     tft.print(nb);
@@ -1142,12 +1141,24 @@ static void drawHomeStocksTile() {
     tft.setCursor(nameX, rowY + 28);
     tft.print(pb);
 
-    // Right block: daily change, prominent.
+    // Right block, line 1: daily change (1D).
     char cb[16]; snprintf(cb, sizeof(cb), "%+.2f%%", mPct);
-    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setFreeFont(&FreeSansBold9pt7b);
     tft.setTextColor(pc, theme.bg);
-    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(cb), rowY + 22);
+    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(cb), rowY + 14);
     tft.print(cb);
+
+    // Right block, line 2: 52-week change ("52W"), small secondary figure.
+    bool  hp   = Stocks::hasPeak(q);
+    float pPct = Stocks::peakPct(q);
+    char  p52[20];
+    if (hp) snprintf(p52, sizeof(p52), "52W %+.2f%%", pPct);
+    else    snprintf(p52, sizeof(p52), "52W --");
+    uint16_t p52col = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
+    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    tft.setTextColor(p52col, theme.bg);
+    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(p52), rowY + 30);
+    tft.print(p52);
 }
 
 static void drawHomePanel() {
