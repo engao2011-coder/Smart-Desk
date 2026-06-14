@@ -310,75 +310,86 @@ static String wifiScanHTML() {
 // times. Each page appends its own rules after the base.
 // ---------------------------------------------------------------------------
 static const char STYLE_BASE[] =
-  "body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;"
+  "*{-webkit-tap-highlight-color:transparent}"
+  "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;"
+  "background:#0d1015;color:#e6eaf0;"
   "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
-  ".card{background:#16213e;border-radius:12px;padding:32px;max-width:420px;width:90%;"
-  "box-shadow:0 4px 24px #0005}"
-  "h2{margin:0 0 24px;color:#e94560;text-align:center}"
-  "input[type=submit]:hover{background:#c73652}";
+  ".card{background:#161b22;border:1px solid #232b35;border-radius:16px;padding:28px;max-width:420px;width:90%;"
+  "box-shadow:0 10px 34px #0008}"
+  "h2{margin:0 0 22px;color:#fff;text-align:center;font-weight:600;font-size:1.3rem;letter-spacing:.2px}"
+  "a{color:#3dd9a0}";
 
 static const char PORTAL_CSS[] =
   ".card{max-width:400px}"
-  "label{display:block;margin:12px 0 4px;font-size:.9rem}"
-  "select,input{width:100%;padding:10px;border:none;border-radius:6px;"
-  "background:#0f3460;color:#eee;font-size:1rem;box-sizing:border-box}"
-  "input[type=submit]{background:#e94560;cursor:pointer;margin-top:20px;font-weight:bold}"
-  ".msg{text-align:center;color:#4ecca3;margin-top:16px;font-size:.9rem}"
+  "label{display:block;margin:14px 0 5px;font-size:.82rem;color:#9ba6b4;letter-spacing:.2px}"
+  "select,input{width:100%;padding:11px;border:1px solid #2a323d;border-radius:8px;"
+  "background:#1c232d;color:#e6eaf0;font-size:1rem;box-sizing:border-box}"
+  "select:focus,input:focus{outline:none;border-color:#ffb053}"
+  "input[type=submit]{background:#ffb053;color:#3a2402;cursor:pointer;margin-top:22px;font-weight:600;border:none}"
+  "input[type=submit]:hover{background:#e89a3d}"
+  ".msg{text-align:center;color:#9ba6b4;margin-top:16px;font-size:.85rem}"
   ".pw-wrap{position:relative}.pw-wrap input{padding-right:44px}"
-  ".pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);"
-  "background:none;border:none;color:#4ecca3;cursor:pointer;font-size:1.1rem;padding:4px 6px;width:auto}"
-  ".refresh{display:inline-block;margin:6px 0;color:#4ecca3;font-size:.8rem;"
-  "cursor:pointer;text-decoration:underline;background:none;border:none}"
+  ".pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);"
+  "background:none;border:none;color:#9ba6b4;cursor:pointer;font-size:1.1rem;padding:4px 6px;width:auto}"
+  ".refresh{display:inline-block;margin:8px 0;color:#3dd9a0;font-size:.8rem;"
+  "cursor:pointer;text-decoration:none;background:none;border:none}"
   "#overlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;"
-  "background:#1a1a2e;z-index:999;flex-direction:column;justify-content:center;align-items:center}"
-  ".spinner{width:48px;height:48px;border:4px solid #0f3460;border-top-color:#e94560;"
+  "background:#0d1015;z-index:999;flex-direction:column;justify-content:center;align-items:center}"
+  ".spinner{width:48px;height:48px;border:4px solid #232b35;border-top-color:#ffb053;"
   "border-radius:50%;animation:spin 1s linear infinite;margin-bottom:20px}"
   "@keyframes spin{to{transform:rotate(360deg)}}";
 
 static const char STATUS_CSS[] =
   "table{width:100%;border-collapse:collapse}"
-  "td{padding:10px 8px;border-bottom:1px solid #0f3460;font-size:.95rem}"
-  "td:first-child{color:#4ecca3;font-weight:bold;width:40%}"
-  ".badge{display:inline-block;background:#4ecca3;color:#1a1a2e;border-radius:4px;"
-  "padding:2px 8px;font-size:.8rem;font-weight:bold}"
-  "a.btn{display:block;text-align:center;margin-top:24px;padding:10px;"
-  "background:#e94560;color:#fff;border-radius:6px;text-decoration:none;font-weight:bold}"
-  "a.btn:hover{background:#c73652}"
-  ".btn-link{display:block;text-align:center;margin-top:14px;color:#9aa0a6;"
-  "font-size:.85rem;text-decoration:none}.btn-link:hover{color:#4ecca3}";
+  "td{padding:12px 4px;border-bottom:1px solid #1e2630;font-size:.92rem}"
+  "td:first-child{color:#9ba6b4;width:42%}"
+  "tr:last-child td{border-bottom:none}"
+  ".badge{display:inline-block;background:rgba(61,217,160,.16);color:#3dd9a0;border-radius:6px;"
+  "padding:3px 10px;font-size:.78rem;font-weight:600}"
+  "a.btn{display:block;text-align:center;margin-top:10px;padding:12px;"
+  "background:#ffb053;color:#3a2402;border-radius:9px;text-decoration:none;font-weight:600}"
+  "a.btn:hover{background:#e89a3d}"
+  "a.btn.alt{background:transparent;color:#cdd5df;border:1px solid #34404d;font-weight:500}"
+  "a.btn.alt:hover{background:#1c232d}"
+  ".btn-link{display:block;text-align:center;margin-top:16px;color:#6b7682;"
+  "font-size:.84rem;text-decoration:none}.btn-link:hover{color:#3dd9a0}";
 
 static const char SETTINGS_CSS[] =
-  "body{padding:16px 0}.card{max-width:440px}"
-  "label{display:block;margin:10px 0 3px;font-size:.85rem;color:#b9c4d6}"
+  "body{padding:18px 0}.card{max-width:440px}"
+  "label{display:block;margin:12px 0 4px;font-size:.82rem;color:#9ba6b4}"
   "select,input[type=text],input[type=number],input[type=password]{"
-  "width:100%;padding:9px;border:none;border-radius:6px;"
-  "background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}"
+  "width:100%;padding:10px;border:1px solid #2a323d;border-radius:8px;"
+  "background:#1c232d;color:#e6eaf0;font-size:.95rem;box-sizing:border-box}"
+  "select:focus,input:focus{outline:none;border-color:#ffb053}"
   ".row{display:flex;gap:10px}.row>div{flex:1}"
-  "input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;"
-  "background:#e94560;color:#fff;cursor:pointer;margin-top:22px;font-weight:bold;font-size:1rem}"
-  ".link{text-align:center;margin-top:14px}.link a{color:#4ecca3;font-size:.85rem}"
-  ".rst{display:block;text-align:center;margin-top:10px;color:#e94560;font-size:.8rem}"
-  ".hint{font-size:.78rem;color:#9bd;line-height:1.4;margin:4px 0 0}"
-  "details{margin:12px 0 4px}"
-  "summary{color:#4ecca3;font-size:1rem;border-bottom:1px solid #0f3460;padding-bottom:4px;"
-  "cursor:pointer;font-weight:bold;list-style:none}"
+  "input[type=submit]{width:100%;padding:13px;border:none;border-radius:9px;"
+  "background:#ffb053;color:#3a2402;cursor:pointer;margin-top:24px;font-weight:600;font-size:1rem}"
+  "input[type=submit]:hover{background:#e89a3d}"
+  ".link{text-align:center;margin-top:16px}.link a{color:#3dd9a0;font-size:.85rem}"
+  ".rst{display:block;text-align:center;margin-top:12px;color:#ff6470;font-size:.8rem;text-decoration:none}"
+  ".hint{font-size:.78rem;color:#6b7682;line-height:1.5;margin:5px 0 0}"
+  "details{margin:16px 0 4px}"
+  "summary{color:#ffb053;font-size:.78rem;letter-spacing:1.3px;text-transform:uppercase;"
+  "border-bottom:1px solid #232b35;padding-bottom:6px;"
+  "cursor:pointer;font-weight:600;list-style:none}"
   "summary::-webkit-details-marker{display:none}"
-  "summary::before{content:'\xE2\x96\xB8 ';font-size:.9rem}"
-  "details[open]>summary::before{content:'\xE2\x96\xBE '}";
+  "summary::before{content:'\xE2\x96\xB8  ';font-size:.8rem}"
+  "details[open]>summary::before{content:'\xE2\x96\xBE  '}";
 
 static const char OTA_CSS[] =
-  "label{display:block;margin:12px 0 4px;font-size:.9rem}"
-  "input[type=file]{width:100%;padding:10px;border:none;border-radius:6px;"
-  "background:#0f3460;color:#eee;font-size:.95rem;box-sizing:border-box}"
-  "input[type=submit]{width:100%;padding:11px;border:none;border-radius:6px;"
-  "background:#e94560;color:#fff;cursor:pointer;margin-top:16px;font-weight:bold;font-size:1rem}"
-  "input[type=submit]:disabled{background:#555;cursor:not-allowed}"
-  ".warn{color:#f0a500;font-size:.85rem;margin-top:8px;text-align:center}"
-  ".msg{text-align:center;color:#4ecca3;margin-top:12px;font-size:.9rem;min-height:1.2em}"
-  "a.btn{display:block;text-align:center;margin-top:14px;color:#4ecca3;font-size:.85rem}"
-  "progress{width:100%;height:16px;border-radius:8px;margin-top:14px;display:none}"
-  "progress::-webkit-progress-bar{background:#0f3460;border-radius:8px}"
-  "progress::-webkit-progress-value{background:#4ecca3;border-radius:8px}";
+  "label{display:block;margin:12px 0 4px;font-size:.85rem;color:#9ba6b4}"
+  "input[type=file]{width:100%;padding:11px;border:1px solid #2a323d;border-radius:8px;"
+  "background:#1c232d;color:#e6eaf0;font-size:.9rem;box-sizing:border-box}"
+  "input[type=submit]{width:100%;padding:13px;border:none;border-radius:9px;"
+  "background:#ffb053;color:#3a2402;cursor:pointer;margin-top:18px;font-weight:600;font-size:1rem}"
+  "input[type=submit]:hover{background:#e89a3d}"
+  "input[type=submit]:disabled{background:#34404d;color:#7a8694;cursor:not-allowed}"
+  ".warn{color:#ffb053;font-size:.82rem;margin-top:10px;text-align:center}"
+  ".msg{text-align:center;color:#3dd9a0;margin-top:12px;font-size:.88rem;min-height:1.2em}"
+  "a.btn{display:block;text-align:center;margin-top:16px;color:#9ba6b4;font-size:.85rem;text-decoration:none}"
+  "progress{width:100%;height:16px;border-radius:8px;margin-top:16px;display:none;border:none}"
+  "progress::-webkit-progress-bar{background:#1c232d;border-radius:8px}"
+  "progress::-webkit-progress-value{background:#ffb053;border-radius:8px}";
 
 // Build the shared <head> (meta + base style + page-specific style). Centralises
 // the boilerplate so a page body is just pageHead(title, css) + its markup.
@@ -427,8 +438,8 @@ static String portalPage() {
 </div>
 <div id="overlay">
   <div class="spinner"></div>
-  <h2 style="color:#4ecca3">Connecting...</h2>
-  <p style="color:#9bd">DeskNexus is restarting.<br>Reconnect to your home WiFi.</p>
+  <h2 style="color:#ffb053">Connecting...</h2>
+  <p style="color:#9ba6b4">DeskNexus is restarting.<br>Reconnect to your home WiFi.</p>
 </div>
 <script>
 document.getElementById('wifiForm').addEventListener('submit',function(){
@@ -446,10 +457,10 @@ static String savedPage() {
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Saved</title>
-<style>body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-display:flex;justify-content:center;align-items:center;min-height:100vh}</style>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#0d1015;color:#e6eaf0;
+display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center}h2{font-weight:600}</style>
 </head>
-<body><h2 style="color:#4ecca3">&#10003; Credentials saved!<br>Device is restarting...</h2></body>
+<body><h2 style="color:#3dd9a0">&#10003; Credentials saved!<br>Device is restarting...</h2></body>
 </html>
 )rawhtml";
 }
@@ -484,8 +495,8 @@ static String statusPage() {
     html += String(uptime);
     html += R"rawhtml(</td></tr>
   </table>
-  <a class="btn" href="/settings">&#9881; Settings</a>
-  <a class="btn" href="/setup" style="background:#0f3460;margin-top:10px">&#128246; Wi-Fi Setup</a>
+  <a class="btn" href="/settings" style="margin-top:22px">&#9881; Settings</a>
+  <a class="btn alt" href="/setup">&#128246; Wi-Fi Setup</a>
   <a class="btn-link" href="/update">&#128260; Firmware Update</a>
 </div>
 </body>
@@ -585,7 +596,7 @@ static String settingsPage() {
                           : "Enter your API key";
     }
     html += R"rawhtml(">
-    <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank" style="color:#4ecca3">openweathermap.org/appid</a>. Weather is optional — clock, prayers and stocks work without it.</p>
+    <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank" style="color:#3dd9a0">openweathermap.org/appid</a>. Weather is optional — clock, prayers and stocks work without it.</p>
     <div class="row">
       <div>
         <label for="units">Units</label>
@@ -684,13 +695,13 @@ static String settingsPage() {
         // Live fetch status next to the input the user edits to fix it.
         if (strlen(Settings::stockSymbols[i]) > 0) {
             const char* txt; const char* col;
-            if (Stocks::needsAttention(i))    { txt = "&#10007; not found &mdash; check symbol"; col = "#e74c3c"; }
-            else if (Stocks::quotes[i].valid) { txt = "&#10003; ok";                              col = "#4ecca3"; }
-            else                              { txt = "&hellip; loading";                         col = "#9aa0a6"; }
+            if (Stocks::needsAttention(i))    { txt = "&#10007; not found &mdash; check symbol"; col = "#ff6470"; }
+            else if (Stocks::quotes[i].valid) { txt = "&#10003; ok";                              col = "#3dd9a0"; }
+            else                              { txt = "&hellip; loading";                         col = "#6b7682"; }
             html += " <span style=\"font-size:.78rem;font-weight:600;color:" + String(col) + "\">" + txt + "</span>";
             // Show the resolved company/fund name once it has been fetched.
             if (Stocks::quotes[i].name[0]) {
-                html += " <span style=\"font-size:.78rem;color:#9aa0a6\">&middot; " +
+                html += " <span style=\"font-size:.78rem;color:#6b7682\">&middot; " +
                         htmlEscape(String(Stocks::quotes[i].name)) + "</span>";
             }
         }
@@ -732,12 +743,12 @@ static String settingsPage() {
     } else {
         for (int i = 0; i < savedNetworkCount; i++) {
             String sSafe = htmlEscape(String(savedNetworks[i].ssid));
-            html += "<div style=\"display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #0f3460\">";
+            html += "<div style=\"display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #1e2630\">";
             html += "<span style=\"font-size:.95rem\">" + sSafe + "</span>";
             html += "<form method=\"POST\" action=\"/forget-network\" style=\"margin:0\">";
             html += "<input type=\"hidden\" name=\"csrf\" value=\"" + String(csrfToken) + "\">";
             html += "<input type=\"hidden\" name=\"idx\" value=\"" + String(i) + "\">";
-            html += "<button type=\"submit\" style=\"background:#e94560;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:.8rem;cursor:pointer\" onclick=\"return confirm('Forget " + sSafe + "?')\">Forget</button>";
+            html += "<button type=\"submit\" style=\"background:#ff6470;color:#3a0d11;border:none;border-radius:6px;padding:5px 12px;font-size:.8rem;font-weight:600;cursor:pointer\" onclick=\"return confirm('Forget " + sSafe + "?')\">Forget</button>";
             html += "</form></div>";
         }
     }
@@ -760,10 +771,10 @@ static String settingsSavedPage() {
 <html lang="en">
 <head><meta charset="UTF-8"><meta http-equiv="refresh" content="2;url=/settings">
 <title>Saved</title>
-<style>body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
-display:flex;justify-content:center;align-items:center;min-height:100vh}</style>
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#0d1015;color:#e6eaf0;
+display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center}h2{font-weight:600}</style>
 </head>
-<body><h2 style="color:#4ecca3">&#10003; Settings saved!<br>Refreshing data...</h2></body>
+<body><h2 style="color:#3dd9a0">&#10003; Settings saved!<br>Refreshing data...</h2></body>
 </html>
 )rawhtml";
 }
@@ -776,11 +787,11 @@ static String settingsErrorPage(const char* msg) {
 <html lang="en">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Not saved</title>
-<style>body{font-family:Arial,sans-serif;background:#1a1a2e;color:#eee;
+<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#0d1015;color:#e6eaf0;
 display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:100vh;text-align:center;margin:0;padding:0 16px}
-a{color:#4ecca3}</style>
+h2{font-weight:600}a{color:#3dd9a0}</style>
 </head>
-<body><h2 style="color:#e94560">&#9888; Not saved</h2><p>)rawhtml";
+<body><h2 style="color:#ff6470">&#9888; Not saved</h2><p>)rawhtml";
     html += htmlEscape(String(msg));
     html += R"rawhtml(</p><p>No changes were applied. <a href="/settings">Go back</a> and try again.</p></body>
 </html>
@@ -830,13 +841,13 @@ static String otaPage() {
       if (xhr.status === 200) {
         msg.textContent = '✓ Flash complete — device restarting…';
       } else {
-        msg.style.color = '#e94560';
+        msg.style.color = '#ff6470';
         msg.textContent = '✗ Update failed: ' + xhr.responseText;
         btn.disabled = false;
       }
     };
     xhr.onerror = function() {
-      msg.style.color = '#e94560';
+      msg.style.color = '#ff6470';
       msg.textContent = '✗ Network error during upload.';
       btn.disabled = false;
     };

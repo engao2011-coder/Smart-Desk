@@ -54,32 +54,35 @@ struct Theme {
     uint16_t highlightBg;   // next-prayer row highlight
 };
 
+// Slate & Amber — a calm near-black slate with a single warm amber accent.
+// Mint is reserved for positive/up/done, red for negative/down, both used
+// sparingly so the amber stays the one thing that draws the eye.
 static const Theme THEME_DARK = {
-    0x18C4,  // bg         — deep slate blue
-    0x2126,  // panel      — softened navy panel
-    0xFC00,  // accent     — warm amber accent
-    0xFFFF,  // textPri    — white
-    0xDEFB,  // textSec    — cool light grey
-    0xB596,  // textDim    — boosted slate (~5:1 contrast)
-    0x3E0A,  // green
-    0xFB2C,  // red
-    0xFD20,  // gold
-    0x4A69,  // separator  — visible blue-grey line
-    0x39A6,  // highlightBg — muted steel blue
+    0x0882,  // bg          — #0D1015 slate-black canvas
+    0x10C4,  // panel       — #161B22 elevated card surface
+    0xFD8A,  // accent      — #FFB053 warm amber (the one brand accent)
+    0xFFFF,  // textPri     — #FFFFFF white
+    0x9D36,  // textSec     — #9BA6B4 cool slate-grey
+    0x6BB0,  // textDim     — #6B7682 muted slate (meets AA on panel)
+    0x3ED4,  // green       — #3DD9A0 mint (positive / done)
+    0xFB2E,  // red         — #FF6470 soft red (negative)
+    0xFE4D,  // gold        — #FFCB6B warm gold (highlights)
+    0x2987,  // separator   — #2A323D hairline
+    0x3143,  // highlightBg — #33291A warm amber tint (next-prayer row)
 };
 
 static const Theme THEME_LIGHT = {
-    0xEF5C,  // bg         — clean warm off-white canvas (de-muddied vs old beige)
-    0xFFFF,  // panel      — pure white (strong card elevation vs bg)
-    0xDB42,  // accent     — refined amber-orange (cleaner than brick)
-    0x1905,  // textPri    — ink slate (16:1 on white)
-    0x42AD,  // textSec    — slate-600 (~7.6:1 on white)
-    0x6BD1,  // textDim    — slate-500 (~4.4:1 on white, meets WCAG AA)
-    0x1408,  // green      — lively emerald (readable up/prayed)
-    0xC965,  // red        — clean red
-    0xB3E1,  // gold       — deep warm amber
-    0xC617,  // separator  — warm hairline (visible on both bg and panel)
-    0xFF9A,  // highlightBg — soft pale amber (calm next-prayer tint)
+    0xEF7E,  // bg          — #ECEEF2 cool light-slate canvas
+    0xFFFF,  // panel       — #FFFFFF pure white card
+    0xE483,  // accent      — #E0901E amber (fill with dark ink text)
+    0x1105,  // textPri     — #16202B ink slate (high contrast)
+    0x4AAC,  // textSec     — #4A5564 slate-600
+    0x6BD1,  // textDim     — #6E7A88 slate-500 (meets AA)
+    0x144B,  // green       — #138A5E emerald (positive / done)
+    0xD1C7,  // red         — #D33A3A clean red
+    0xAB62,  // gold        — #A86E10 deep amber
+    0xD6FC,  // separator   — #D7DCE3 cool hairline
+    0xFF5A,  // highlightBg — #FCEBD0 soft amber tint (next-prayer row)
 };
 
 // ---------------------------------------------------------------------------
@@ -98,14 +101,22 @@ static const Theme THEME_LIGHT = {
 static int LAYOUT_PANEL_Y = PANEL_Y_FULL;
 static int LAYOUT_PANEL_H = PANEL_H_FULL;
 
-// ── Home dashboard grid ──────────────────────────────────────────────────
-// Four full-width horizontal rows stacked top-to-bottom: Time/date, Weather,
-// Prayer, Stocks. Tapping a row (except the time row) opens its detail page.
-#define HOME_ROW_H   (SCREEN_H / 4)      // 80 px per row
-#define HOME_TIME_Y  0                   // time/date banner
-#define HOME_WEA_Y   HOME_ROW_H          // weather row   (80)
-#define HOME_PRA_Y   (HOME_ROW_H * 2)    // prayer row    (160)
-#define HOME_STK_Y   (HOME_ROW_H * 3)    // stocks row    (240)
+// ── Home dashboard layout ────────────────────────────────────────────────
+// A card-less dashboard with strong hierarchy, divided by hairlines:
+//   Hero    — dominant clock + date (left), weather chip (right)
+//   Prayer  — next prayer name, time, countdown + progress bar
+//   Markets — top-moving stock: name/price + daily change
+// Tapping the weather chip opens Forecast; the prayer band opens Prayer; the
+// markets band opens Stocks. The clock itself is not a link.
+#define HOME_PAD     14
+#define HOME_HERO_Y  0
+#define HOME_HERO_H  120
+#define HOME_PRA_Y   120                 // next-prayer band
+#define HOME_PRA_H   108
+#define HOME_STK_Y   228                 // markets band
+#define HOME_STK_H   (SCREEN_H - HOME_STK_Y)
+// Weather chip occupies the right portion of the hero; taps here open Forecast.
+#define HOME_WEATHER_X  128
 
 // Page indices (no Settings page on display)
 #define PAGE_HOME      0
@@ -449,16 +460,20 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
         return true;
     }
 
-    // Home page rows — the top time/date row isn't a link; the weather, prayer
-    // and stocks rows below open their detail page based on which row was tapped.
+    // Home dashboard — the clock itself isn't a link. Tapping the weather chip
+    // (right side of the hero) opens Forecast; the prayer band opens Prayer; the
+    // markets band opens Stocks.
     if (activePage == PAGE_HOME) {
-        if ((int)ty < HOME_WEA_Y) {
-            return true;   // time row — consume but don't navigate
-        }
         int targetPage;
-        if ((int)ty < HOME_PRA_Y)      targetPage = PAGE_FORECAST;  // weather row
-        else if ((int)ty < HOME_STK_Y) targetPage = PAGE_PRAYER;    // prayer row
-        else                           targetPage = PAGE_STOCKS;    // stocks row
+        if ((int)ty < HOME_PRA_Y) {
+            // Hero band: only the weather chip on the right is a link.
+            if ((int)tx >= HOME_WEATHER_X) targetPage = PAGE_FORECAST;
+            else return true;   // clock area — consume, no navigation
+        } else if ((int)ty < HOME_STK_Y) {
+            targetPage = PAGE_PRAYER;
+        } else {
+            targetPage = PAGE_STOCKS;
+        }
 
         if (isPageAllowed(targetPage)) {
             playPanelTransition(1);
@@ -898,126 +913,137 @@ static const char* const HOME_MON[12]  = {"Jan","Feb","Mar","Apr","May","Jun",
                                           "Jul","Aug","Sep","Oct","Nov","Dec"};
 static String g_homeDateStr;   // full date string incl. "W##"; set by redraw()
 
-// Shared row frame: full-width rounded card for one horizontal widget.
-static void drawHomeRowCard(int rowY) {
-    tft.fillRoundRect(6, rowY + 4, SCREEN_W - 12, HOME_ROW_H - 8, 8, theme.panel);
-}
-
-// Centre a short message vertically in a row (loading / no-data states).
-static void drawHomeRowMsg(int rowY, int leftX, const char* msg) {
+// Small uppercase tracked section label (e.g. "NEXT PRAYER", "MARKETS").
+static void drawHomeLabel(int x, int y, const char* text, uint16_t color) {
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(leftX, rowY + HOME_ROW_H / 2 + 3);
+    tft.setTextColor(color, theme.bg);
+    // Manual letter-spacing for a refined logotype feel.
+    int cx = x;
+    for (const char* p = text; *p; ++p) {
+        char ch[2] = {*p, 0};
+        tft.setCursor(cx, y);
+        tft.print(ch);
+        cx += tft.textWidth(ch) + 2;
+    }
+}
+
+// Centre a short message vertically in a band (loading / no-data states).
+static void drawHomeBandMsg(int bandY, int bandH, const char* msg) {
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setCursor(HOME_PAD, bandY + bandH / 2 + 3);
     tft.print(msg);
 }
 
-// Row 1 — Time / date banner: large time (left), weekday/day/month + week
-// number (right), and a small WiFi status dot.
+// Hero — dominant clock + date (left), weather chip (right). Drawn directly on
+// the background (no card) with a hairline divider below it.
 static void drawHomeBanner() {
     struct tm t; bool ok = getLocalTime(&t);
     bool wifi = Network::isConnected();
 
-    tft.fillRect(0, HOME_TIME_Y, SCREEN_W, HOME_ROW_H, theme.bg);
-    drawHomeRowCard(HOME_TIME_Y);
-    const int cardY = HOME_TIME_Y + 4, cardH = HOME_ROW_H - 8;
+    tft.fillRect(0, HOME_HERO_Y, SCREEN_W, HOME_HERO_H, theme.bg);
 
-    // Time (left, large)
+    // Status line — date (left) + week number, with a small WiFi dot.
+    if (ok) {
+        char d1[24];
+        snprintf(d1, sizeof(d1), "%s %d %s",
+                 HOME_WD[(t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0],
+                 t.tm_mday,
+                 HOME_MON[(t.tm_mon >= 0 && t.tm_mon < 12) ? t.tm_mon : 0]);
+        drawHomeLabel(HOME_PAD, HOME_HERO_Y + 16, d1, theme.textSec);
+    }
+    const int rightX = SCREEN_W - HOME_PAD;
+    int wi = g_homeDateStr.indexOf('W');
+    int dotX = rightX;
+    if (wi >= 0) {
+        String wk = g_homeDateStr.substring(wi);
+        tft.setFreeFont(nullptr); tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.bg);
+        int wkW = tft.textWidth(wk.c_str());
+        tft.setCursor(rightX - wkW, HOME_HERO_Y + 16);
+        tft.print(wk);
+        dotX = rightX - wkW - 10;
+    }
+    tft.fillCircle(dotX - 3, HOME_HERO_Y + 19, 3, wifi ? theme.green : theme.red);
+
+    // Time — the dominant element, large and left-aligned.
     char hm[6];
     if (ok) snprintf(hm, sizeof(hm), "%02d:%02d", t.tm_hour, t.tm_min);
     else    strncpy(hm, "--:--", sizeof(hm));
     tft.setTextSize(1);
     tft.setFreeFont(&FreeSansBold24pt7b);
-    tft.setTextColor(theme.textPri, theme.panel);
-    tft.setCursor(14, cardY + cardH / 2 + 16);
+    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setCursor(HOME_PAD - 2, HOME_HERO_Y + 92);
     tft.print(hm);
 
-    const int rightX = SCREEN_W - 12;
-
-    // Date (weekday day month), right-aligned
-    if (ok) {
-        char d1[20];
-        snprintf(d1, sizeof(d1), "%s %d %s",
-                 HOME_WD[(t.tm_wday >= 0 && t.tm_wday < 7) ? t.tm_wday : 0],
-                 t.tm_mday,
-                 HOME_MON[(t.tm_mon >= 0 && t.tm_mon < 12) ? t.tm_mon : 0]);
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.textSec, theme.panel);
-        tft.setCursor(rightX - tft.textWidth(d1), cardY + 30);
-        tft.print(d1);
-    }
-
-    // Week number, parsed from the date string ("... W24")
-    int wi = g_homeDateStr.indexOf('W');
-    if (wi >= 0) {
-        String wk = g_homeDateStr.substring(wi);
-        tft.setFreeFont(&FreeSansBold9pt7b);
-        tft.setTextColor(theme.gold, theme.panel);
-        tft.setCursor(rightX - tft.textWidth(wk.c_str()), cardY + 52);
-        tft.print(wk);
-    }
-
-    // WiFi status dot — top-right corner of the card.
-    tft.fillCircle(rightX - 1, cardY + 10, 4, wifi ? theme.green : theme.red);
+    // Hairline divider below the hero.
+    tft.drawFastHLine(HOME_PAD, HOME_HERO_Y + HOME_HERO_H - 1, SCREEN_W - 2 * HOME_PAD, theme.separator);
 
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 }
 
-// Row 2 — Weather: icon + temperature (left), condition + humidity/city (right).
+// Weather chip — top-right of the hero: icon, temperature, condition. Clears
+// only its own sub-region so a partial refresh never erases the clock.
 static void drawHomeWeatherTile() {
-    tft.fillRect(0, HOME_WEA_Y, SCREEN_W, HOME_ROW_H, theme.bg);
-    drawHomeRowCard(HOME_WEA_Y);
-    const int midY = HOME_WEA_Y + HOME_ROW_H / 2;
+    const int chipX = HOME_WEATHER_X;
+    const int chipY = HOME_HERO_Y + 26;
+    const int chipW = SCREEN_W - chipX - HOME_PAD;
+    tft.fillRect(chipX, chipY, chipW + HOME_PAD, 64, theme.bg);
 
     if (!Weather::current.valid) {
-        drawHomeRowMsg(HOME_WEA_Y, 18,
-            (Weather::current.fetchState == Weather::WEATHER_NO_KEY) ? "Weather: add API key" : "Weather ...");
+        tft.setFreeFont(nullptr); tft.setTextSize(1);
+        tft.setTextColor(theme.textDim, theme.bg);
+        const char* m = (Weather::current.fetchState == Weather::WEATHER_NO_KEY)
+                        ? "add API key" : "weather ...";
+        tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(m), chipY + 30);
+        tft.print(m);
         return;
     }
     const Weather::Data& wd = Weather::current;
     uint16_t accent = Weather::iconColor(wd.iconCode);
+    const int rightX = SCREEN_W - HOME_PAD;
 
-    drawWeatherIcon(34, midY, wd.iconCode);
-
-    // Temperature — the GFX fonts have no '°' glyph, so draw the ring by hand.
+    // Line 1 — temperature (right-aligned) with the icon to its left.
     const char* unit = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
     char nb[8]; snprintf(nb, sizeof(nb), "%.0f", wd.temp);
     tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold12pt7b);
-    tft.setTextColor(accent, theme.panel);
-    const int tX = 58, tBase = midY + 7;
+    tft.setFreeFont(&FreeSansBold18pt7b);
+    int numW = tft.textWidth(nb);
+    const int degW = 14;            // degree ring + unit glyph
+    const int tBase = chipY + 34;
+    const int tX = rightX - numW - degW;
+    tft.setTextColor(theme.textPri, theme.bg);
     tft.setCursor(tX, tBase);
     tft.print(nb);
-    int dX = tX + tft.textWidth(nb);
-    tft.drawCircle(dX + 4, tBase - 13, 2, accent);   // degree ring
-    tft.setCursor(dX + 9, tBase);
+    int dX = tX + numW;
+    tft.drawCircle(dX + 4, tBase - 17, 2, theme.textSec);   // degree ring
+    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setCursor(dX + 8, tBase - 3);
     tft.print(unit);
 
-    // Right block: condition (top) + humidity (bottom)
-    const int rightX = SCREEN_W - 14;
-    tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold9pt7b);
-    tft.setTextColor(theme.textSec, theme.panel);
-    const char* lbl = Weather::iconLabel(wd.iconCode);
-    tft.setCursor(rightX - tft.textWidth(lbl), midY - 6);
-    tft.print(lbl);
+    // Weather icon to the left of the temperature, centred on the same line.
+    drawWeatherIcon(tX - 18, tBase - 9, wd.iconCode);
 
-    char hb[28];
-    snprintf(hb, sizeof(hb), "Hum %.0f%%", wd.humidity);
+    // Line 2 — condition label (right-aligned, accent colour).
     tft.setFreeFont(nullptr); tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(rightX - tft.textWidth(hb), midY + 12);
-    tft.print(hb);
+    tft.setTextColor(accent, theme.bg);
+    const char* lbl = Weather::iconLabel(wd.iconCode);
+    tft.setCursor(rightX - tft.textWidth(lbl), chipY + 50);
+    tft.print(lbl);
 }
 
-// Row 3 — Prayer: next prayer name (left), time (centre), countdown (right).
+// Next-prayer band — label, name (amber), time, countdown + progress bar.
 static void drawHomePrayerTile() {
-    tft.fillRect(0, HOME_PRA_Y, SCREEN_W, HOME_ROW_H, theme.bg);
-    drawHomeRowCard(HOME_PRA_Y);
-    const int midY = HOME_PRA_Y + HOME_ROW_H / 2;
+    tft.fillRect(0, HOME_PRA_Y, SCREEN_W, HOME_PRA_H, theme.bg);
+    const int top = HOME_PRA_Y + 16;
 
-    if (!Prayer::current.valid) { drawHomeRowMsg(HOME_PRA_Y, 18, "Prayers ..."); return; }
+    if (!Prayer::current.valid) { drawHomeBandMsg(HOME_PRA_Y, HOME_PRA_H, "Prayers ...");
+        tft.drawFastHLine(HOME_PAD, HOME_PRA_Y + HOME_PRA_H - 1, SCREEN_W - 2 * HOME_PAD, theme.separator);
+        return; }
 
     int nextIdx = Prayer::current.nextIndex;
     int hi = (nextIdx == 1) ? 2 : nextIdx;      // skip Sunrise
@@ -1031,24 +1057,24 @@ static void drawHomePrayerTile() {
     if (nextIdx == 1 && nowMin >= 0)
         cd = Prayer::toMinutes(Prayer::current.prayers[2].time) - nowMin;
 
-    // Left block: "NEXT" label + prayer name (gold)
+    const int rightX = SCREEN_W - HOME_PAD;
+
+    // Label
+    drawHomeLabel(HOME_PAD, top, "NEXT PRAYER", theme.accent);
+
+    // Name (left, large) + time (right, aligned to name baseline).
+    tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextSize(1);
-    tft.setFreeFont(nullptr);
-    tft.setTextColor(theme.textDim, theme.panel);
-    tft.setCursor(16, midY - 10);
-    tft.print("NEXT");
-    tft.setFreeFont(&FreeSansBold12pt7b);
-    tft.setTextColor(theme.gold, theme.panel);
-    tft.setCursor(16, midY + 14);
+    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setCursor(HOME_PAD - 1, top + 32);
     tft.print(name);
 
-    // Right block: time (top) + countdown (below), both right-aligned
-    const int rightX = SCREEN_W - 14;
     tft.setFreeFont(&FreeSansBold12pt7b);
-    tft.setTextColor(theme.textPri, theme.panel);
-    tft.setCursor(rightX - tft.textWidth(tm), midY - 1);
+    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setCursor(rightX - tft.textWidth(tm), top + 30);
     tft.print(tm);
 
+    // Countdown (left, below name).
     tft.setFreeFont(nullptr); tft.setTextSize(1);
     char cdb[20];
     if (cd >= 0) {
@@ -1056,49 +1082,71 @@ static void drawHomePrayerTile() {
         if (h > 0) snprintf(cdb, sizeof(cdb), "in %dh %02dm", h, m);
         else       snprintf(cdb, sizeof(cdb), "in %dm", m);
     } else strncpy(cdb, "--", sizeof(cdb));
-    tft.setTextColor(theme.textSec, theme.panel);
-    tft.setCursor(rightX - tft.textWidth(cdb), midY + 15);
+    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setCursor(HOME_PAD, top + 50);
     tft.print(cdb);
+
+    // Progress bar — fraction of the gap to the next prayer already elapsed.
+    const int barX = HOME_PAD, barW = SCREEN_W - 2 * HOME_PAD;
+    const int barY = top + 60, barH = 4;
+    tft.fillRoundRect(barX, barY, barW, barH, 2, theme.separator);
+    int prevIdx = (hi - 1 + Prayer::PRAYER_COUNT) % Prayer::PRAYER_COUNT;
+    int prevMin = Prayer::toMinutes(Prayer::current.prayers[prevIdx].time);
+    int nextMin = Prayer::toMinutes(Prayer::current.prayers[hi].time);
+    float frac = 0.5f;
+    if (cd >= 0 && nextMin > prevMin) {
+        int span = nextMin - prevMin;
+        if (span > 0) frac = 1.0f - (float)cd / (float)span;
+    }
+    if (frac < 0.04f) frac = 0.04f; if (frac > 1.0f) frac = 1.0f;
+    tft.fillRoundRect(barX, barY, (int)(barW * frac), barH, 2, theme.accent);
+
+    tft.drawFastHLine(HOME_PAD, HOME_PRA_Y + HOME_PRA_H - 1, SCREEN_W - 2 * HOME_PAD, theme.separator);
 }
 
-// Row 4 — Stocks: symbol (left), price (centre), daily change (right).
+// Markets band — top-moving stock: name + price (left), daily change (right),
+// with a coloured rail on the left signalling up/down.
 static void drawHomeStocksTile() {
-    tft.fillRect(0, HOME_STK_Y, SCREEN_W, HOME_ROW_H, theme.bg);
-    drawHomeRowCard(HOME_STK_Y);
-    const int midY = HOME_STK_Y + HOME_ROW_H / 2;
+    tft.fillRect(0, HOME_STK_Y, SCREEN_W, HOME_STK_H, theme.bg);
+    const int top = HOME_STK_Y + 14;
+
+    drawHomeLabel(HOME_PAD, top, "MARKETS", theme.textDim);
 
     int idx = Stocks::displayQuoteIndex();
-    if (idx < 0) { drawHomeRowMsg(HOME_STK_Y, 18, "Stocks ..."); return; }
+    if (idx < 0) { drawHomeBandMsg(HOME_STK_Y + 18, HOME_STK_H - 18, "Stocks ..."); return; }
 
     const Stocks::Quote& q = Stocks::quotes[idx];
     float mPct = Stocks::metricPct(q);
     uint16_t pc = (mPct >= 0) ? theme.green : theme.red;
 
-    // Coloured edge bar at the far left signals up/down.
-    tft.fillRect(10, HOME_STK_Y + 12, 4, HOME_ROW_H - 24, pc);
+    const int rowY = top + 14;
 
-    // Left block: symbol / name (top) + price (below)
-    tft.setTextSize(1);
+    // Coloured rail at the left signals up/down.
+    tft.fillRect(HOME_PAD, rowY, 4, 34, pc);
+
+    // Left block: name (top) + price (below).
+    const int nameX = HOME_PAD + 12;
     char nb[24];
     tft.setFreeFont(&FreeSansBold12pt7b);
-    fitTextToWidth(Stocks::displayName(q), 140, nb, sizeof(nb));
-    tft.setTextColor(theme.textPri, theme.panel);
-    tft.setCursor(22, midY - 2);
+    tft.setTextSize(1);
+    fitTextToWidth(Stocks::displayName(q), 130, nb, sizeof(nb));
+    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setCursor(nameX, rowY + 14);
     tft.print(nb);
 
     char pb[16];
     if (Settings::stockEuro) snprintf(pb, sizeof(pb), "EUR %.2f", Stocks::euroPrice(q));
     else                     snprintf(pb, sizeof(pb), "$%.2f", q.price);
     tft.setFreeFont(nullptr); tft.setTextSize(1);
-    tft.setTextColor(theme.textSec, theme.panel);
-    tft.setCursor(22, midY + 14);
+    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setCursor(nameX, rowY + 28);
     tft.print(pb);
 
-    // Right block: daily change, prominent and vertically centred
+    // Right block: daily change, prominent.
     char cb[16]; snprintf(cb, sizeof(cb), "%+.2f%%", mPct);
     tft.setFreeFont(&FreeSansBold12pt7b);
-    tft.setTextColor(pc, theme.panel);
-    tft.setCursor(SCREEN_W - 14 - tft.textWidth(cb), midY + 7);
+    tft.setTextColor(pc, theme.bg);
+    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(cb), rowY + 22);
     tft.print(cb);
 }
 

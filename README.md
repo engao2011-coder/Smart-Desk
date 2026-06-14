@@ -19,9 +19,10 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 | **Auto Location** | Automatically detects city and timezone from IP on boot |
 | **Setup Wizard** | First-boot QR-code setup flow for easy Wi-Fi configuration |
 | **OTA Updates** | Over-the-air firmware updates via ArduinoOTA push or browser HTTP upload |
-| **Auto-carousel** | Detail pages (Prayer, Forecast, Stocks) rotate automatically; pauses on manual touch and returns to the Home page after idle |
+| **Auto-return** | Any detail page returns to the Home dashboard after an idle period |
 | **Auto-dim** | Backlight dims after configurable idle period |
-| **Touch nav** | Tap the right/left half of the panel for next/previous page; on the Home page tap the prayer or stock region to drill into its detail page. Settings are configured from the web portal, not the display |
+| **Touch nav** | Location-based: on Home, tap the weather chip → Forecast, the prayer band → Prayer, the markets band → Stocks. Tap a detail page to return Home. Settings are configured from the web portal, not the display |
+| **Theme** | "Slate & Amber" — near-black slate with a single warm amber accent; auto light/dark by time of day, or forced via settings. Shared by the display and web portal |
 | **Persistent Settings** | User configuration saved to NVS (ESP32 flash) and survives reboots |
 
 ---
@@ -205,33 +206,44 @@ no login.
 
 ## Screen Layout (Portrait 240 × 320)
 
-The display is split into three horizontal zones. The status bar and hero are
-always visible; the bottom panel swaps between pages.
+Every page fills the whole screen. The **Home** dashboard is the hub — you reach
+a detail page by tapping its region on Home, and a tap (or an idle timeout)
+returns you there. The look is the "Slate & Amber" theme: a near-black slate
+canvas with a single warm amber accent, mint for positive/up, red for
+negative/down.
+
+### Home dashboard
 
 ```
 ┌────────────────────────────┐ y=0
-│ ● Fri 13 Jun    ■ ● ○ ○     │ ← Status bar (24 px): WiFi dot · date · page dots
-├────────────────────────────┤ y=24
-│   14:35       ☀  31°C       │ ← Hero (100 px): clock + weekday (left)
-│   ─────       Sunny         │   weather icon · temp · condition ·
-│   Friday      Hum 28%  city │   humidity · city (right)
-├────────────────────────────┤ y=124
+│ Mon 14 Jun           W24 ●  │ ← date · week number · WiFi dot
 │                            │
-│   Panel  (196 px)           │ ← One of: Home · Prayer · Forecast · Stocks
-│                            │
+│  14:32           ☀ 24°      │ ← dominant clock (left) · weather chip (right)
+│                    Clear    │
+├────────────────────────────┤ ~y=120
+│ NEXT PRAYER                │
+│ Asr                  15:48  │ ← next prayer name · time
+│ in 1h 16m                  │
+│ ▰▰▰▰▰▰▱▱▱▱                  │ ← elapsed-progress bar to next prayer
+├────────────────────────────┤ ~y=228
+│ MARKETS                    │
+│ ▏ S&P 500          +1.24%   │ ← top-moving stock · daily change
+│ ▏ $5,431.60                │
 └────────────────────────────┘ y=320
 ```
 
-**Pages** (selected via auto-carousel or touch):
+Tap the **weather chip** → Forecast · the **prayer band** → Prayer · the
+**markets band** → Stocks. The clock itself is not a link.
 
-- **Home** — idle landing page; compact prayer timeline + a rotating stock card.
-- **Prayer** — full prayer list with the next prayer highlighted and a fused
-  countdown/progress chip.
+### Detail pages
+
+- **Prayer** — full prayer list with the next prayer highlighted; mark prayed or
+  snooze a due prayer.
 - **Forecast** — 5-day weather outlook.
 - **Stocks** — per-symbol detail with name, daily (1D) and 52-week (52W) change.
 
-Detail pages auto-rotate; the carousel pauses on touch and the display returns
-to **Home** after an idle period. **Settings** are not shown on the display —
+Tap anywhere on a detail page to return to **Home**; it also returns
+automatically after an idle period. **Settings** are not shown on the display —
 they are configured from the web portal (see *Web admin login* above).
 
 ---
