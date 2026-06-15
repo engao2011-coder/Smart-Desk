@@ -84,6 +84,29 @@ struct ReminderEvent {
 };
 
 // ---------------------------------------------------------------------------
+// Percent-encode a query value so multi-word cities ("Abu Dhabi", "New York")
+// and any non-ASCII characters produce a valid URL (RFC 3986 unreserved set is
+// passed through; everything else becomes %XX).
+// ---------------------------------------------------------------------------
+static String urlEncode(const String& s) {
+    static const char* hex = "0123456789ABCDEF";
+    String out;
+    out.reserve(s.length() * 3);
+    for (unsigned int i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (isalnum((unsigned char)c) || c == '-' || c == '_' ||
+            c == '.' || c == '~') {
+            out += c;
+        } else {
+            out += '%';
+            out += hex[(c >> 4) & 0xF];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // Parse "HH:MM" string into minutes since midnight
 // ---------------------------------------------------------------------------
 static int toMinutes(const char* hhmm) {
@@ -501,11 +524,13 @@ static int minutesUntilNext() {
 // ---------------------------------------------------------------------------
 static bool fetchForTime(const struct tm& t) {
     lastFetchAttemptMs = millis();
-    char url[256];
+    String cityEnc    = urlEncode(String(Settings::city));
+    String countryEnc = urlEncode(String(Settings::country));
+    char url[320];
     snprintf(url, sizeof(url),
              "https://api.aladhan.com/v1/timingsByCity?city=%s&country=%s&method=%d"
              "&day=%d&month=%d&year=%d",
-             Settings::city, Settings::country, Settings::prayerMethod,
+             cityEnc.c_str(), countryEnc.c_str(), Settings::prayerMethod,
              t.tm_mday, t.tm_mon + 1, t.tm_year + 1900);
 
     WiFiClientSecure client;

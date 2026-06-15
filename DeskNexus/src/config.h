@@ -52,6 +52,9 @@
 #define WIFI_SAVED_NETWORKS_MAX  5       // number of remembered Wi-Fi networks
 
 // Access-Point fallback settings (captive portal)
+// NOTE: WPA2 requires a password of at least 8 characters. If AP_PASSWORD is set
+// to a non-empty string shorter than 8 chars the ESP32 falls back to an OPEN
+// network. Leave it empty to use the auto-derived 8-char "deskXXXX" password.
 #define AP_SSID      "DeskNexus-Setup"
 #define AP_PASSWORD  ""                   // Open network; set a password if desired
 // Auto-generated AP password: "desk" + last 4 hex chars of device MAC address.
@@ -90,6 +93,10 @@
 // ---------------------------------------------------------------------------
 // OpenWeatherMap
 // Register at https://openweathermap.org/api to get a free API key.
+// SECURITY NOTE: all outbound HTTPS calls (weather, prayer, stocks, geo-IP) use
+// WiFiClientSecure::setInsecure() — TLS is encrypted but the server certificate
+// is NOT verified. This is a deliberate trade-off for the ESP32's limited RAM;
+// it means a man-in-the-middle on your LAN could observe the API key in transit.
 // ---------------------------------------------------------------------------
 #define OWM_API_KEY    "YOUR_OPENWEATHERMAP_API_KEY"   // ← replace
 #define OWM_CITY_NAME  "Riyadh"                         // ← your city
@@ -107,9 +114,9 @@
 
 // ---------------------------------------------------------------------------
 // Prayer Times (Aladhan API — https://aladhan.com/prayer-times-api)
+// Prayer times use the same city/country as the weather above (OWM_CITY_NAME /
+// OWM_COUNTRY) — location is configured once and shared by both services.
 // ---------------------------------------------------------------------------
-#define PRAYER_CITY     "Riyadh"    // ← your city
-#define PRAYER_COUNTRY  "SA"        // ISO country code
 // Calculation method (Aladhan method number):
 //  1 = Muslim World League, 2 = ISNA, 3 = Egypt, 4 = Makkah, 5 = Karachi
 //  8 = Gulf Region, 16 = Turkey, 17 = Tehran …

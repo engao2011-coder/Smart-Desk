@@ -4,6 +4,13 @@
  * Provides mutable settings that can be changed via the web UI and
  * persisted to NVS (ESP32 Preferences).  Compile-time #defines in
  * config.h serve as initial defaults when no NVS value exists yet.
+ *
+ * NOTE ON THE HEADER-ONLY PATTERN: like the other DeskNexus modules, this header
+ * defines its state and functions as `static` at namespace scope. That is sound
+ * only because every module is included into a SINGLE translation unit
+ * (main.cpp). Including any of these headers from a second .cpp would give that
+ * TU its own private copy of the state — if the project ever grows a second
+ * source file, these should move to a .cpp with `extern` declarations here.
  */
 
 #pragma once
@@ -30,9 +37,18 @@ static char owmUnits[12]  = OWM_UNITS;
 static int  prayerMethod  = PRAYER_METHOD;
 
 // Stocks (Yahoo Finance — no API key needed)
-static char stockSymbols[MAX_STOCKS][24] = {
-    "IUSE.L", "IUSD.DE", "PPFB.DE", "", ""
-};
+// Compiled defaults come from STOCK_SYMBOLS in config.h. The array is seeded at
+// the top of load() and resetToDefaults() so editing config.h takes effect.
+static char stockSymbols[MAX_STOCKS][24] = {};
+
+// Copy the compiled STOCK_SYMBOLS defaults (config.h) into stockSymbols.
+static void applyCompiledStockDefaults() {
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        strncpy(stockSymbols[i], STOCK_SYMBOLS[i] ? STOCK_SYMBOLS[i] : "",
+                sizeof(stockSymbols[i]) - 1);
+        stockSymbols[i][sizeof(stockSymbols[i]) - 1] = '\0';
+    }
+}
 
 // Timezone
 static long utcOffset = NTP_UTC_OFFSET_SEC;
@@ -92,6 +108,10 @@ static constexpr int NVS_VERSION = 2;
 // Load from NVS (falls back to compiled defaults when key is absent)
 // ---------------------------------------------------------------------------
 static void load() {
+    // Seed compiled defaults first so they survive an NVS version-mismatch wipe
+    // (that path returns early) and are overwritten only by stored values.
+    applyCompiledStockDefaults();
+
     Preferences prefs;
     prefs.begin("settings", false);  // read-write (needed for potential migration)
 
@@ -234,10 +254,7 @@ static void resetToDefaults() {
     strncpy(owmUnits,  OWM_UNITS,     sizeof(owmUnits) - 1);
     prayerMethod = PRAYER_METHOD;
 
-    const char* defaults[MAX_STOCKS] = {"IUSE.L","IUSD.DE","PPFB.DE","",""};
-    for (int i = 0; i < MAX_STOCKS; i++) {
-        strncpy(stockSymbols[i], defaults[i], sizeof(stockSymbols[i]) - 1);
-    }
+    applyCompiledStockDefaults();
     utcOffset = NTP_UTC_OFFSET_SEC;
     themeDark = true;
     themeMode = 0;

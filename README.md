@@ -13,7 +13,7 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 | **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
 | **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
 | **Stocks** | Live quotes for up to 5 symbols via Yahoo Finance (no API key required); shows a concise company/fund name (generic ETF/issuer boilerplate such as "iShares", "MSCI", "UCITS", "ETF", "USD" is stripped) with both the daily (1D) and 52-week (52W) change. The Home markets band shows the top mover; the Stocks page lists all symbols |
-| **Notifications** | On-screen banner when a stock moves ≥ 2 %, a prayer is approaching, or a break reminder is due |
+| **Notifications** | On-screen banner when a prayer is approaching/due or a break reminder fires. Stocks signal moves visually: a gold dot when a symbol moves ≥ 2 % vs the previous close, and the display auto-switches to the Stocks page when a symbol moves ≥ 1 % since the last fetch |
 | **Break Reminder** | Configurable periodic reminder to take a break (default every 60 min) |
 | **WiFi** | Hybrid: connects to saved network; falls back to AP captive-portal if unavailable |
 | **Auto Location** | Automatically detects city and timezone from IP on boot |
@@ -91,7 +91,7 @@ No manual library installation is needed.
 | Library | Author | Version |
 |---------|--------|---------|
 | TFT_eSPI | Bodmer | ^2.5 |
-| XPT2046_Touchscreen | Paul Stoffregen | ^1.4 |
+| XPT2046_Touchscreen | Paul Stoffregen | git (latest) |
 | ArduinoJson | Benoit Blanchon | ^6.21 |
 | QRCode | Richard Moore | ^0.0.1 |
 
@@ -108,7 +108,7 @@ Open `DeskNexus/src/config.h` and fill in:
 // Timezone (auto-detected on boot if AUTO_DETECT_LOCATION_TIME is true)
 #define NTP_UTC_OFFSET_SEC   10800   // e.g. 10800 = UTC+3
 
-// OpenWeatherMap
+// OpenWeatherMap. City/country here are shared by both weather AND prayer times.
 #define OWM_API_KEY    "your_key_here"
 #define OWM_CITY_NAME  "Riyadh"
 #define OWM_COUNTRY    "SA"
@@ -119,11 +119,13 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
     "IUSE.L", "IUSD.DE", "PPFB.DE", "", "",
 };
 
-// Prayer times
-#define PRAYER_CITY    "Riyadh"
-#define PRAYER_COUNTRY "SA"
+// Prayer times (uses OWM_CITY_NAME / OWM_COUNTRY above for the location)
 #define PRAYER_METHOD  4          // 4 = Umm Al-Qura / Makkah
 ```
+
+> All of these compiled values are just *initial* defaults — once the device is
+> running you can change city, stocks, prayer method and more from the web portal
+> (`http://desknexus.local/settings`), and the changes persist to flash.
 
 **Free API keys:**
 - OpenWeatherMap: <https://openweathermap.org/api>
@@ -264,7 +266,7 @@ five printed values, and paste them into:
 
 | Goal | Where to change |
 |------|----------------|
-| Different city / country | `src/config.h` → `OWM_CITY_NAME`, `PRAYER_CITY` (or enable auto-detection) |
+| Different city / country | `src/config.h` → `OWM_CITY_NAME`, `OWM_COUNTRY` (shared by weather + prayer; or enable auto-detection / set from the web portal) |
 | Different timezone | `src/config.h` → `NTP_UTC_OFFSET_SEC` (or enable auto-detection) |
 | Auto-detect location & timezone | `src/config.h` → `AUTO_DETECT_LOCATION_TIME` |
 | Different prayer method | `src/config.h` → `PRAYER_METHOD` |
@@ -273,7 +275,7 @@ five printed values, and paste them into:
 | Stock alert threshold | `src/config.h` → `STOCK_ALERT_PCT` |
 | Stock refresh interval | `src/config.h` → `STOCK_REFRESH_MS` |
 | Break reminder interval | `src/config.h` → `BREAK_REMINDER_INTERVAL_M` |
-| Colour theme | `src/ui.h` → colour palette (`C_*` defines) |
+| Colour theme | `src/ui.h` → `THEME_DARK` / `THEME_LIGHT` structs |
 | Backlight timeout | `src/config.h` → `SCREEN_TIMEOUT_MS` |
 | Backlight brightness | `src/config.h` → `BACKLIGHT_FULL_DUTY` / `BACKLIGHT_DIM_DUTY` |
 | Auto-carousel timing | `src/config.h` → `CAROUSEL_INTERVAL_MS` |

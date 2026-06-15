@@ -2223,25 +2223,6 @@ static void showConnectingScreen(const char* ssid) {
     tft.drawRoundRect(barX, barY, barW, barH, 4, setupTheme.separator);
 }
 
-static void updateConnectingProgress(int percent) {
-    Theme setupTheme = THEME_DARK;
-    int barX = 41, barY = 171, barW = SCREEN_W - 82, barH = 10;
-    int fillW = barW * percent / 100;
-    if (fillW > barW) fillW = barW;
-    tft.fillRoundRect(barX, barY, fillW, barH, 3, setupTheme.accent);
-
-    // Percentage text
-    tft.fillRect(barX, barY + 16, barW, 14, setupTheme.panel);
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
-    tft.setTextColor(setupTheme.textSec, setupTheme.panel);
-    char msg[8];
-    snprintf(msg, sizeof(msg), "%d%%", percent);
-    int tw = tft.textWidth(msg);
-    tft.setCursor((SCREEN_W - tw) / 2, barY + 18);
-    tft.print(msg);
-}
-
 static void showConnectionResult(bool success, const char* detail) {
     Theme setupTheme = THEME_DARK;
     tft.fillScreen(setupTheme.bg);

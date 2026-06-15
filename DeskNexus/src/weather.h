@@ -18,6 +18,29 @@
 namespace Weather {
 
 // ---------------------------------------------------------------------------
+// Percent-encode a query value so multi-word cities ("Abu Dhabi", "New York")
+// and any non-ASCII characters produce a valid URL. RFC 3986 unreserved set is
+// passed through unchanged; everything else becomes %XX.
+// ---------------------------------------------------------------------------
+static String urlEncode(const String& s) {
+    static const char* hex = "0123456789ABCDEF";
+    String out;
+    out.reserve(s.length() * 3);
+    for (unsigned int i = 0; i < s.length(); i++) {
+        char c = s[i];
+        if (isalnum((unsigned char)c) || c == '-' || c == '_' ||
+            c == '.' || c == '~') {
+            out += c;
+        } else {
+            out += '%';
+            out += hex[(c >> 4) & 0xF];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
 // Data model
 // ---------------------------------------------------------------------------
 enum FetchState {
@@ -116,7 +139,7 @@ static bool fetch() {
     }
 
     String url = "https://api.openweathermap.org/data/2.5/weather?q=";
-    url += String(Settings::city) + "," + String(Settings::country);
+    url += urlEncode(String(Settings::city)) + "," + urlEncode(String(Settings::country));
     url += "&appid=" + apiKey;
     url += "&units=" + String(Settings::owmUnits);
     url += "&lang="  + String(OWM_LANG);
@@ -220,7 +243,7 @@ static bool fetchForecast() {
     }
 
     String url = "https://api.openweathermap.org/data/2.5/forecast?q=";
-    url += String(Settings::city) + "," + String(Settings::country);
+    url += urlEncode(String(Settings::city)) + "," + urlEncode(String(Settings::country));
     url += "&appid=" + apiKey;
     url += "&units=" + String(Settings::owmUnits);
     url += "&cnt=40";
