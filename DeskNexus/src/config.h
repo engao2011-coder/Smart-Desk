@@ -126,18 +126,12 @@
 // - fetched at most once per wall-clock day
 // - successful fetch window is persisted in NVS
 
-#define PRAYER_SLOT_COUNT         6    // total prayer slots (Fajr..Isha incl. Sunrise)
 #define PRAYER_PRE_ALERT_MINUTES  15
-#define PRAYER_SNOOZE_MINUTES     15
-#define PRAYER_MAX_SNOOZE_COUNT   3    // max snooze attempts per prayer per day
-#define PRAYER_REMINDER_MINUTES   30
-#define PRAYER_FULLSCREEN_MS      600000
+#define PRAYER_FULLSCREEN_MS      600000  // azan screen auto-dismiss timeout
 
 // Banner notification durations (ms) — per event type
 #define BANNER_PRE_ALERT_MS   15000   // 15 s for upcoming prayer
 #define BANNER_DUE_MS         20000   // 20 s for prayer due
-#define BANNER_REPEAT_MS       8000   // 8 s for repeat reminder
-#define BANNER_SNOOZE_EXP_MS  12000   // 12 s for snooze expired
 #define BANNER_DEFAULT_MS      5000   // 5 s for generic banners
 
 // ---------------------------------------------------------------------------

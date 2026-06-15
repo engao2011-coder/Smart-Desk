@@ -11,7 +11,7 @@ real-time clock, weather, daily prayer times, and live stock quotes.
 |---------|--------|
 | **Clock** | Large HH:MM display; NTP-synced |
 | **Weather** | Current temperature, condition, humidity & wind via OpenWeatherMap; 5-day forecast with temperature-swing alerts |
-| **Prayer Times** | All five prayers + Sunrise via Aladhan API; highlights next prayer with countdown; snooze support |
+| **Prayer Times** | All five prayers + Sunrise via Aladhan API, with Hijri date; full-screen page highlights the next prayer with a live countdown; an azan screen announces each prayer when due |
 | **Stocks** | Live quotes for up to 5 symbols via Yahoo Finance (no API key required); shows a concise company/fund name (generic ETF/issuer boilerplate such as "iShares", "MSCI", "UCITS", "ETF", "USD" is stripped) with both the daily (1D) and 52-week (52W) change. The Home markets band shows the top mover; the Stocks page lists all symbols |
 | **Notifications** | On-screen banner when a prayer is approaching/due or a break reminder fires. Stocks signal moves visually: a gold dot when a symbol moves ≥ 2 % vs the previous close, and the display auto-switches to the Stocks page when a symbol moves ≥ 1 % since the last fetch |
 | **Break Reminder** | Configurable periodic reminder to take a break (default every 60 min) |
@@ -239,8 +239,28 @@ Tap the **weather chip** → Forecast · the **prayer band** → Prayer · the
 
 ### Detail pages
 
-- **Prayer** — full prayer list with the next prayer highlighted; mark prayed or
-  snooze a due prayer.
+- **Prayer** — a "next prayer" hero (name, time, countdown, progress bar, Hijri
+  date) over a read-only timetable of all six entries, with the next prayer
+  highlighted and past prayers dimmed. An azan screen appears when a prayer is
+  due; tap **Dismiss** to clear it.
+
+  ```
+  ┌────────────────────────────┐ y=0
+  │ TUE 15 JUN          ● Cairo │ ← Gregorian date · WiFi dot · city
+  │ NEXT PRAYER                │
+  │ Asr                  17:02  │ ← next prayer name (left) · time (right)
+  │ in 1h 20m                  │ ← live countdown
+  │ ▰▰▰▰▰▰▱▱▱▱                  │ ← elapsed-progress bar to next prayer
+  │      20 Dhul-Hijjah 1447    │ ← Hijri date
+  ├────────────────────────────┤
+  │ Fajr                 03:58  │ ← past prayers dimmed
+  │ · Sunrise            05:41  │ ← Sunrise marked, never highlighted
+  │ Dhuhr                13:08  │
+  │ ▎Asr                 17:02  │ ← next prayer highlighted (amber)
+  │ Maghrib              20:35  │ ← upcoming prayers bright
+  │ Isha                 22:18  │
+  └────────────────────────────┘ y=320
+  ```
 - **Forecast** — 5-day weather outlook.
 - **Stocks** — per-symbol detail with name, daily (1D) and 52-week (52W) change.
 
@@ -270,7 +290,7 @@ five printed values, and paste them into:
 | Different timezone | `src/config.h` → `NTP_UTC_OFFSET_SEC` (or enable auto-detection) |
 | Auto-detect location & timezone | `src/config.h` → `AUTO_DETECT_LOCATION_TIME` |
 | Different prayer method | `src/config.h` → `PRAYER_METHOD` |
-| Prayer alert timing | `src/config.h` → `PRAYER_PRE_ALERT_MINUTES`, snooze settings |
+| Prayer alert timing | `src/config.h` → `PRAYER_PRE_ALERT_MINUTES` |
 | Stock symbols | `src/config.h` → `STOCK_SYMBOLS[]` (Yahoo Finance format: TICKER.EXCHANGE) |
 | Stock alert threshold | `src/config.h` → `STOCK_ALERT_PCT` |
 | Stock refresh interval | `src/config.h` → `STOCK_REFRESH_MS` |

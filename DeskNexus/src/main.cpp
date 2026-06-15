@@ -182,25 +182,6 @@ static void processPrayerReminderEvent() {
             UI::showBanner(msg, BANNER_DUE_MS, UI::BANNER_RED);
             UI::showAzanScreen(event.prayerIndex);
             break;
-        case Prayer::REMINDER_REPEAT:
-            snprintf(msg, sizeof(msg), "Reminder: %s still pending", name);
-            UI::showBanner(msg, BANNER_REPEAT_MS, UI::BANNER_ACCENT);
-            UI::activePage = PAGE_PRAYER;
-            UI::needsRedraw = true;
-            break;
-        case Prayer::REMINDER_SNOOZE_EXPIRED:
-            snprintf(msg, sizeof(msg), "%s snooze ended", name);
-            UI::wake();  // wake display when snooze expires
-            UI::showBanner(msg, BANNER_SNOOZE_EXP_MS, UI::BANNER_GOLD);
-            UI::activePage = PAGE_PRAYER;
-            UI::needsRedraw = true;
-            break;
-        case Prayer::REMINDER_MISSED_CATCHUP:
-            snprintf(msg, sizeof(msg), "%s missed - tap to mark", name);
-            UI::showBanner(msg, BANNER_SNOOZE_EXP_MS, UI::BANNER_RED);
-            UI::activePage = PAGE_PRAYER;
-            UI::needsRedraw = true;
-            break;
         case Prayer::REMINDER_NONE:
         default:
             break;
@@ -224,7 +205,6 @@ void setup() {
 
     // Load runtime settings first so UI starts with persisted theme.
     Settings::load();
-    Prayer::loadPersistentState();
 
     // Init display + splash
     UI::begin();
