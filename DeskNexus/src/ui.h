@@ -23,13 +23,22 @@
  * page, a tap on the panel returns to Home. After 60s idle it also returns to
  * Home automatically. (Pages no longer auto-rotate on a timer.)
  *
- * Fonts used: TFT_eSPI built-in Free fonts (FreeSansBold24pt7b etc.)
+ * Fonts used: TFT_eSPI built-in Free fonts (MontserratBold24pt7b etc.)
  */
 
 #pragma once
 
 #include <TFT_eSPI.h>
 #include <qrcode.h>
+// Montserrat Bold — custom GFX fonts (Adafruit format) replacing the stock
+// FreeSansBold faces. Same byte layout/baseline semantics, nicer typeface.
+#include "fonts/MontserratBold9pt7b.h"
+#include "fonts/MontserratBold12pt7b.h"
+#include "fonts/MontserratBold14pt7b.h"
+#include "fonts/MontserratBold18pt7b.h"
+#include "fonts/MontserratBold22pt7b.h"
+#include "fonts/MontserratBold24pt7b.h"
+#include "fonts/MontserratSB6pt7b.h"
 #include "config.h"
 #include "settings.h"
 #include "network.h"
@@ -71,18 +80,22 @@ static const Theme THEME_DARK = {
     0x3143,  // highlightBg — #33291A warm amber tint (next-prayer row)
 };
 
+// Light theme tuned for cheap TFT panels, which desaturate and wash out
+// mid-tone colours. To read as *colour* on a bright panel the accents must be
+// saturated AND fairly dark; a slightly deeper bg + stronger hairlines give the
+// otherwise-flat layout some depth.
 static const Theme THEME_LIGHT = {
-    0xEF7E,  // bg          — #ECEEF2 cool light-slate canvas
+    0xE73D,  // bg          — #E3E7EE cool light-slate canvas (deeper for depth)
     0xFFFF,  // panel       — #FFFFFF pure white card
-    0xE483,  // accent      — #E0901E amber (fill with dark ink text)
+    0xC340,  // accent      — #C26A00 strong amber (labels / edge bars)
     0x1105,  // textPri     — #16202B ink slate (high contrast)
     0x4AAC,  // textSec     — #4A5564 slate-600
     0x6BD1,  // textDim     — #6E7A88 slate-500 (meets AA)
-    0x144B,  // green       — #138A5E emerald (positive / done)
-    0xD1C7,  // red         — #D33A3A clean red
-    0xAB62,  // gold        — #A86E10 deep amber
-    0xD6FC,  // separator   — #D7DCE3 cool hairline
-    0xFF5A,  // highlightBg — #FCEBD0 soft amber tint (next-prayer row)
+    0x0C69,  // green       — #0E8F4C vivid emerald (positive / done)
+    0xC945,  // red         — #CE2B2B clean saturated red
+    0xCC41,  // gold        — #CC8A0A warm amber (highlights / prayer time)
+    0xCE9B,  // separator   — #C9D0DA cool hairline (more visible)
+    0xFF17,  // highlightBg — #FBE3B8 amber tint (next-prayer row)
 };
 
 // ---------------------------------------------------------------------------
@@ -116,7 +129,7 @@ static int LAYOUT_PANEL_H = PANEL_H_FULL;
 #define HOME_STK_Y   228                 // markets band
 #define HOME_STK_H   (SCREEN_H - HOME_STK_Y)
 // Weather chip occupies the right portion of the hero; taps here open Forecast.
-#define HOME_WEATHER_X  128
+#define HOME_WEATHER_X  142
 
 // Page indices (no Settings page on display)
 #define PAGE_HOME      0
@@ -514,17 +527,28 @@ static void drawWeatherIcon(int cx, int cy, const String& code) {
 }
 
 // ---------------------------------------------------------------------------
+// Small UI text now uses Montserrat SemiBold (6pt) rather than the blocky
+// classic bitmap font. The classic font positioned text by its TOP edge, but
+// GFX fonts position by the BASELINE — so any Y that was tuned for the classic
+// font must add UI_SMALL_CAP to keep the visual top in the same place.
+// ---------------------------------------------------------------------------
+static const int UI_SMALL_CAP = 9;          // cap height of MontserratSB6pt7b
+static inline void uiSmallFont() {
+    tft.setFreeFont(&MontserratSB6pt7b);
+    tft.setTextSize(1);
+}
+
+// ---------------------------------------------------------------------------
 // Small uppercase tracked label (manual letter-spacing for a logotype feel).
 // Shared by the prayer hero and the Home dashboard bands.
 // ---------------------------------------------------------------------------
 static void drawTrackedLabel(int x, int y, const char* text, uint16_t color) {
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
+    uiSmallFont();
     tft.setTextColor(color, theme.bg);
     int cx = x;
     for (const char* p = text; *p; ++p) {
         char ch[2] = {*p, 0};
-        tft.setCursor(cx, y);
+        tft.setCursor(cx, y + UI_SMALL_CAP);
         tft.print(ch);
         cx += tft.textWidth(ch) + 2;
     }
@@ -545,7 +569,7 @@ static void drawPrayerPanel() {
     tft.setTextSize(1);
 
     if (!Prayer::current.valid) {
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextColor(theme.textDim, theme.bg);
         const char* m = "Prayer times loading...";
         tft.setCursor((SCREEN_W - tft.textWidth(m)) / 2, SCREEN_H / 2);
@@ -592,8 +616,10 @@ static void drawPrayerPanel() {
     drawTrackedLabel(PAD, 28, "NEXT PRAYER", theme.accent);
 
     // ── Next prayer name (left) + time (right) on a shared baseline ──
+    // 14pt (not 18) so the longest name + a wide time (e.g. "Maghrib" + "20:48")
+    // never collide on the 240px-wide row.
     tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setFreeFont(&MontserratBold14pt7b);
     tft.setTextColor(theme.textPri, theme.bg);
     tft.setCursor(PAD - 1, 72);
     tft.print(hName);
@@ -621,16 +647,19 @@ static void drawPrayerPanel() {
     int prevMin = Prayer::toMinutes(P.prayers[prevIdx].time);
     int nextMin = Prayer::toMinutes(P.prayers[hi].time);
     float frac = 0.5f;
-    if (cd >= 0 && nextMin > prevMin) {
+    if (cd >= 0) {
         int span = nextMin - prevMin;
+        if (span <= 0) span += 1440;   // window crosses midnight (Isha → Fajr)
         if (span > 0) frac = 1.0f - (float)cd / (float)span;
     }
     if (frac < 0.04f) frac = 0.04f; if (frac > 1.0f) frac = 1.0f;
-    tft.fillRoundRect(barX, barY, (int)(barW * frac), barH, 2, theme.accent);
+    // Green normally; amber when the prayer is imminent (≤ 20 min left).
+    uint16_t barCol = (cd >= 0 && cd <= 20) ? theme.accent : theme.green;
+    tft.fillRoundRect(barX, barY, (int)(barW * frac), barH, 2, barCol);
 
     // ── Hijri date (centered) ──
     if (P.hijriValid) {
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
         tft.setTextColor(theme.textSec, theme.bg);
         tft.setCursor((SCREEN_W - tft.textWidth(P.hijriDate)) / 2, 124);
@@ -670,7 +699,7 @@ static void drawPrayerPanel() {
             nameX = 26;
         }
 
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
         tft.setTextColor(nameCol, rowBg);
         tft.setCursor(nameX, cy + 6);
@@ -758,10 +787,9 @@ static void drawHomeLabel(int x, int y, const char* text, uint16_t color) {
 
 // Centre a short message vertically in a band (loading / no-data states).
 static void drawHomeBandMsg(int bandY, int bandH, const char* msg) {
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
+    uiSmallFont();
     tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(HOME_PAD, bandY + bandH / 2 + 3);
+    tft.setCursor(HOME_PAD, bandY + bandH / 2 + 5);
     tft.print(msg);
 }
 
@@ -801,7 +829,7 @@ static void drawHomeBanner() {
     if (ok) snprintf(hm, sizeof(hm), "%02d:%02d", t.tm_hour, t.tm_min);
     else    strncpy(hm, "--:--", sizeof(hm));
     tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold24pt7b);
+    tft.setFreeFont(&MontserratBold22pt7b);   // 22pt: clears the weather chip even at "00:00"
     tft.setTextColor(theme.textPri, theme.bg);
     tft.setCursor(HOME_PAD - 2, HOME_HERO_Y + 92);
     tft.print(hm);
@@ -822,11 +850,11 @@ static void drawHomeWeatherTile() {
     tft.fillRect(chipX, chipY, chipW + HOME_PAD, 64, theme.bg);
 
     if (!Weather::current.valid) {
-        tft.setFreeFont(nullptr); tft.setTextSize(1);
+        uiSmallFont();
         tft.setTextColor(theme.textDim, theme.bg);
         const char* m = (Weather::current.fetchState == Weather::WEATHER_NO_KEY)
                         ? "add API key" : "weather ...";
-        tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(m), chipY + 30);
+        tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(m), chipY + 30 + UI_SMALL_CAP);
         tft.print(m);
         return;
     }
@@ -838,7 +866,7 @@ static void drawHomeWeatherTile() {
     const char* unit = (strcmp(Settings::owmUnits, "imperial") == 0) ? "F" : "C";
     char nb[8]; snprintf(nb, sizeof(nb), "%.0f", wd.temp);
     tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setFreeFont(&MontserratBold18pt7b);
     int numW = tft.textWidth(nb);
     const int degW = 14;            // degree ring + unit glyph
     const int tBase = chipY + 34;
@@ -848,7 +876,7 @@ static void drawHomeWeatherTile() {
     tft.print(nb);
     int dX = tX + numW;
     tft.drawCircle(dX + 4, tBase - 17, 2, theme.textSec);   // degree ring
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextColor(theme.textSec, theme.bg);
     tft.setCursor(dX + 8, tBase - 3);
     tft.print(unit);
@@ -857,10 +885,10 @@ static void drawHomeWeatherTile() {
     drawWeatherIcon(tX - 18, tBase - 9, wd.iconCode);
 
     // Line 2 — condition label (right-aligned, accent colour).
-    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    uiSmallFont();
     tft.setTextColor(accent, theme.bg);
     const char* lbl = Weather::iconLabel(wd.iconCode);
-    tft.setCursor(rightX - tft.textWidth(lbl), chipY + 50);
+    tft.setCursor(rightX - tft.textWidth(lbl), chipY + 50 + UI_SMALL_CAP);
     tft.print(lbl);
 }
 
@@ -891,7 +919,7 @@ static void drawHomePrayerTile() {
     drawHomeLabel(HOME_PAD, top, "NEXT PRAYER", theme.accent);
 
     // Name (left) + time (right), on a shared baseline well below the label.
-    tft.setFreeFont(&FreeSansBold12pt7b);
+    tft.setFreeFont(&MontserratBold12pt7b);
     tft.setTextSize(1);
     tft.setTextColor(theme.textPri, theme.bg);
     tft.setCursor(HOME_PAD - 1, top + 34);
@@ -902,7 +930,7 @@ static void drawHomePrayerTile() {
     tft.print(tm);
 
     // Countdown (left, below name).
-    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    uiSmallFont();
     char cdb[20];
     if (cd >= 0) {
         int h = cd / 60, m = cd % 60;
@@ -910,7 +938,7 @@ static void drawHomePrayerTile() {
         else       snprintf(cdb, sizeof(cdb), "in %dm", m);
     } else strncpy(cdb, "--", sizeof(cdb));
     tft.setTextColor(theme.textDim, theme.bg);
-    tft.setCursor(HOME_PAD, top + 52);
+    tft.setCursor(HOME_PAD, top + 52 + UI_SMALL_CAP);
     tft.print(cdb);
 
     // Progress bar — fraction of the gap to the next prayer already elapsed.
@@ -921,12 +949,15 @@ static void drawHomePrayerTile() {
     int prevMin = Prayer::toMinutes(Prayer::current.prayers[prevIdx].time);
     int nextMin = Prayer::toMinutes(Prayer::current.prayers[hi].time);
     float frac = 0.5f;
-    if (cd >= 0 && nextMin > prevMin) {
+    if (cd >= 0) {
         int span = nextMin - prevMin;
+        if (span <= 0) span += 1440;   // window crosses midnight (Isha → Fajr)
         if (span > 0) frac = 1.0f - (float)cd / (float)span;
     }
     if (frac < 0.04f) frac = 0.04f; if (frac > 1.0f) frac = 1.0f;
-    tft.fillRoundRect(barX, barY, (int)(barW * frac), barH, 2, theme.accent);
+    // Green normally; amber when the prayer is imminent (≤ 20 min left).
+    uint16_t barCol = (cd >= 0 && cd <= 20) ? theme.accent : theme.green;
+    tft.fillRoundRect(barX, barY, (int)(barW * frac), barH, 2, barCol);
 
     tft.drawFastHLine(HOME_PAD, HOME_PRA_Y + HOME_PRA_H - 1, SCREEN_W - 2 * HOME_PAD, theme.separator);
 }
@@ -954,7 +985,7 @@ static void drawHomeStocksTile() {
     // Left block: name (top) + price (below).
     const int nameX = HOME_PAD + 12;
     char nb[24];
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     fitTextToWidth(Stocks::displayName(q), 120, nb, sizeof(nb));
     tft.setTextColor(theme.textPri, theme.bg);
@@ -964,14 +995,14 @@ static void drawHomeStocksTile() {
     char pb[16];
     if (Settings::stockEuro) snprintf(pb, sizeof(pb), "EUR %.2f", Stocks::euroPrice(q));
     else                     snprintf(pb, sizeof(pb), "$%.2f", q.price);
-    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    uiSmallFont();
     tft.setTextColor(theme.textSec, theme.bg);
-    tft.setCursor(nameX, rowY + 28);
+    tft.setCursor(nameX, rowY + 28 + UI_SMALL_CAP);
     tft.print(pb);
 
     // Right block, line 1: daily change (1D).
     char cb[16]; snprintf(cb, sizeof(cb), "%+.2f%%", mPct);
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextColor(pc, theme.bg);
     tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(cb), rowY + 14);
     tft.print(cb);
@@ -983,9 +1014,9 @@ static void drawHomeStocksTile() {
     if (hp) snprintf(p52, sizeof(p52), "52W %+.2f%%", pPct);
     else    snprintf(p52, sizeof(p52), "52W --");
     uint16_t p52col = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
-    tft.setFreeFont(nullptr); tft.setTextSize(1);
+    uiSmallFont();
     tft.setTextColor(p52col, theme.bg);
-    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(p52), rowY + 30);
+    tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(p52), rowY + 30 + UI_SMALL_CAP);
     tft.print(p52);
 }
 
@@ -1070,7 +1101,7 @@ static void drawAzanScreen() {
     drawMosqueIcon(SCREEN_W / 2, cardY + 60, mosqueColor);
 
     // Prayer name (large, centered)
-    tft.setFreeFont(&FreeSansBold24pt7b);
+    tft.setFreeFont(&MontserratBold24pt7b);
     tft.setTextColor(theme.textPri, theme.panel);
     const char* name = Prayer::current.prayers[prayerIndex].name;
     int tw = tft.textWidth(name);
@@ -1078,7 +1109,7 @@ static void drawAzanScreen() {
     tft.print(name);
 
     // Prayer time in gold
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setFreeFont(&MontserratBold18pt7b);
     tft.setTextColor(theme.gold, theme.panel);
     const char* timeStr = Prayer::current.prayers[prayerIndex].time;
     tw = tft.textWidth(timeStr);
@@ -1281,7 +1312,22 @@ static void drawForecastPanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Stocks panel (y=124..319) — expanded, readable fonts, no zebra striping
+// Blend two RGB565 colours: returns `fg` laid over `bg` at `alpha`/255 weight.
+// Used for the soft tinted gain/loss chips behind the daily figure so the same
+// code adapts to both the dark and light themes.
+// ---------------------------------------------------------------------------
+static uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
+    uint8_t fr = (fg >> 11) & 0x1F, fgr = (fg >> 5) & 0x3F, fb = fg & 0x1F;
+    uint8_t br = (bg >> 11) & 0x1F, bgr = (bg >> 5) & 0x3F, bb = bg & 0x1F;
+    uint8_t rr = (fr  * alpha + br  * (255 - alpha)) / 255;
+    uint8_t rg = (fgr * alpha + bgr * (255 - alpha)) / 255;
+    uint8_t rb = (fb  * alpha + bb  * (255 - alpha)) / 255;
+    return (uint16_t)((rr << 11) | (rg << 5) | rb);
+}
+
+// ---------------------------------------------------------------------------
+// Stocks panel — smooth FreeSans rows with tinted gain/loss chips, matching
+// the Slate & Amber redesign used by the rest of the UI. Sorted by daily mover.
 // ---------------------------------------------------------------------------
 static void drawStocksPanel() {
     fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
@@ -1300,7 +1346,30 @@ static void drawStocksPanel() {
 
     tft.fillRoundRect(8, LAYOUT_PANEL_Y + 8, SCREEN_W - 16, LAYOUT_PANEL_H - 16, 12, theme.panel);
 
-    const int START_Y = LAYOUT_PANEL_Y + 14;
+    // Header strip: page title + freshness of the newest successful quote.
+    const int hdrY = LAYOUT_PANEL_Y + 16;
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(1);
+    tft.setTextColor(theme.textDim, theme.panel);
+    tft.setCursor(20, hdrY);
+    tft.print("TOP MOVERS");
+
+    unsigned long newest = 0;
+    for (int i = 0; i < MAX_STOCKS; i++)
+        if (Stocks::quotes[i].valid && Stocks::quotes[i].fetchedAt > newest)
+            newest = Stocks::quotes[i].fetchedAt;
+    time_t nowEpoch = time(nullptr);
+    if (newest > 0 && nowEpoch > 100000) {
+        time_t fetchEpoch = nowEpoch - (time_t)((millis() - newest) / 1000);
+        struct tm ft; localtime_r(&fetchEpoch, &ft);
+        char hm[16];
+        snprintf(hm, sizeof(hm), "as of %02d:%02d", ft.tm_hour, ft.tm_min);
+        tft.setCursor(SCREEN_W - 20 - tft.textWidth(hm), hdrY);
+        tft.print(hm);
+    }
+    tft.drawFastHLine(20, hdrY + 12, SCREEN_W - 40, theme.separator);
+
+    const int START_Y = hdrY + 22;
     int order[MAX_STOCKS];
     int orderCount = 0;
 
@@ -1332,8 +1401,7 @@ static void drawStocksPanel() {
     // (the hero no longer sits above us), clamped so rows stay readable.
     const int nRows      = max(1, min(orderCount, 5));
     const int cardBottom = LAYOUT_PANEL_Y + LAYOUT_PANEL_H - 10;
-    const int ROW_H      = max(32, min(64, (cardBottom - START_Y) / nRows));
-    const int vpad       = (ROW_H - 32) / 2;   // centre the 32px content block
+    const int ROW_H      = max(36, min(60, (cardBottom - START_Y) / nRows));
 
     int shown = 0;
 
@@ -1341,119 +1409,107 @@ static void drawStocksPanel() {
         int i = order[oi];
         const Stocks::Quote& q = Stocks::quotes[i];
 
-        int ry = START_Y + shown * ROW_H;   // slot top
-        int cy = ry + vpad;                 // centred content top
-        uint16_t rowBg = theme.panel;   // uniform bg — no zebra
-        uint16_t edgeColor = theme.separator;
-
-        if (q.valid) {
-            edgeColor = (Stocks::metricPct(q) >= 0) ? theme.green : theme.red;
-        }
-
-        tft.fillRect(14, ry, SCREEN_W - 28, ROW_H - 2, rowBg);
-        tft.fillRect(14, ry, 5, ROW_H - 2, edgeColor);
+        const int ry   = START_Y + shown * ROW_H;          // slot top
+        const int cTop = ry + (ROW_H - 34) / 2;            // centred 34px content block
+        const uint16_t rowBg = theme.panel;                // uniform bg — no zebra
+        const int nameX = 24;
 
         if (!q.valid) {
             bool badSym = Stocks::needsAttention(i);
-            tft.setTextSize(2);
-            // Symbol in the alert colour when it needs fixing, dim otherwise.
-            tft.setTextColor(badSym ? theme.gold : theme.textDim, rowBg);
-            tft.setCursor(26, cy + 8);
+            tft.setFreeFont(&MontserratBold9pt7b);
+            tft.setTextSize(1);
+            tft.setTextColor(badSym ? theme.textSec : theme.textDim, rowBg);
+            tft.setCursor(nameX, cTop + 16);
             tft.print(Settings::stockSymbols[i]);
 
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
             if (badSym) {
-                // Tell the user this symbol is the problem, not the network.
-                tft.setTextSize(1);
-                tft.setTextColor(theme.red, rowBg);
-                const char* msg = "CHECK SYMBOL";
-                int mw = tft.textWidth(msg);
-                tft.setCursor(SCREEN_W - mw - 24, cy + 12);
+                // Soft error pill — tells the user the symbol is the problem.
+                const char* msg = "check symbol";
+                int mw    = tft.textWidth(msg);
+                int chipW = mw + 16;
+                int chipX = SCREEN_W - 16 - chipW;
+                int chipY = cTop + 6;
+                uint16_t pillBg = blend565(theme.red, theme.panel, 46);
+                tft.fillRoundRect(chipX, chipY, chipW, 18, 9, pillBg);
+                tft.setTextColor(theme.red, pillBg);
+                tft.setCursor(chipX + 8, chipY + 6);
                 tft.print(msg);
             } else {
                 tft.setTextColor(theme.textDim, rowBg);
-                tft.setCursor(154, cy + 8);
+                tft.setCursor(SCREEN_W - 16 - tft.textWidth("..."), cTop + 12);
                 tft.print("...");
             }
         } else {
-            // Row 1, right: daily change ("1D") — primary, size-2 figure with a
-            // small dim label. Measured first so the name gets the rest of the
-            // row width. Numbers right-align at SCREEN_W-24 on both rows; the
-            // alert dot lives in the margin to the right of them.
-            float dPct = Stocks::metricPct(q);
-            uint16_t dCol = (dPct >= 0) ? theme.green : theme.red;
-            char dBuf[12];
-            snprintf(dBuf, sizeof(dBuf), "%+.2f%%", dPct);
-            tft.setTextSize(2);
-            int dW    = tft.textWidth(dBuf);
-            int dNumX = SCREEN_W - 24 - dW;
-            tft.setTextSize(1);
-            int d1X = dNumX - tft.textWidth("1D") - 5;
+            float    dPct   = Stocks::metricPct(q);
+            bool     up     = (dPct >= 0);
+            uint16_t dCol   = up ? theme.green : theme.red;
+            uint16_t chipBg = blend565(dCol, theme.panel, 50);
 
-            // Name (left): prefer size 2; shrink to size 1, then truncate.
-            const char* nm       = Stocks::displayName(q);
-            int         nameX    = 26;
-            int         nameMaxW = d1X - nameX - 8;
-            char        nameBuf[44];
-            int         nameY    = cy + 2;
-            tft.setTextSize(2);
-            if (tft.textWidth(nm) > nameMaxW) {
-                tft.setTextSize(1);   // shrink before resorting to truncation
-                nameY = cy + 6;
+            // Daily-change chip (right): direction caret + magnitude. The sign
+            // is carried by the caret, so the number itself is unsigned.
+            char dBuf[10];
+            snprintf(dBuf, sizeof(dBuf), "%.2f%%", fabsf(dPct));
+            tft.setFreeFont(&MontserratBold9pt7b);
+            tft.setTextSize(1);
+            const int numW   = tft.textWidth(dBuf);
+            const int caretW = 9, padL = 9, padR = 11, gap = 4, chipH = 22;
+            const int chipW  = padL + caretW + gap + numW + padR;
+            const int chipX  = SCREEN_W - 16 - chipW;
+            const int chipY  = cTop;
+            tft.fillRoundRect(chipX, chipY, chipW, chipH, 11, chipBg);
+
+            // Alert: a gold ring around the chip, tied to the figure it flags.
+            if (q.alertTriggered) {
+                tft.drawRoundRect(chipX,     chipY,     chipW,     chipH,     11, theme.gold);
+                tft.drawRoundRect(chipX + 1, chipY + 1, chipW - 2, chipH - 2, 10, theme.gold);
             }
-            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
-            tft.setTextColor(theme.textPri, rowBg);
-            tft.setCursor(nameX, nameY);
-            tft.print(nameBuf);
 
-            // "1D" label + daily figure
-            tft.setTextSize(1);
-            tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(d1X, cy + 7);
-            tft.print("1D");
-            tft.setTextSize(2);
-            tft.setTextColor(dCol, rowBg);
-            tft.setCursor(dNumX, cy + 2);
+            const int caX = chipX + padL + caretW / 2;
+            const int caY = chipY + chipH / 2;
+            if (up) tft.fillTriangle(caX - 4, caY + 3, caX + 4, caY + 3, caX, caY - 4, dCol);
+            else    tft.fillTriangle(caX - 4, caY - 3, caX + 4, caY - 3, caX, caY + 4, dCol);
+
+            tft.setTextColor(dCol, chipBg);
+            tft.setCursor(chipX + padL + caretW + gap, chipY + 15);
             tft.print(dBuf);
 
-            // Row 2, left: price — secondary context.
-            char priceBuf[14];
-            if (Settings::stockEuro) {
-                snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
-            } else {
-                snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
-            }
+            // Name (left), shrink-to-fit against the chip.
+            const char* nm       = Stocks::displayName(q);
+            const int   nameMaxW = chipX - 8 - nameX;
+            char        nameBuf[44];
+            tft.setFreeFont(&MontserratBold9pt7b);
+            tft.setTextSize(1);
+            fitTextToWidth(nm, nameMaxW, nameBuf, sizeof(nameBuf));
+            tft.setTextColor(theme.textPri, rowBg);
+            tft.setCursor(nameX, cTop + 14);
+            tft.print(nameBuf);
+
+            // Price (left, line 2) — secondary context.
+            char priceBuf[16];
+            if (Settings::stockEuro) snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
+            else                     snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
+            tft.setFreeFont(nullptr);
             tft.setTextSize(1);
             tft.setTextColor(theme.textSec, rowBg);
-            tft.setCursor(26, cy + 21);
+            tft.setCursor(nameX, cTop + 26);
             tft.print(priceBuf);
 
-            // Row 2, right: 52-week change ("52W"), small. "--" when no
-            // 52-week high was reported for this symbol.
+            // 52-week context (right, line 2): distance below the peak, in words.
             bool  hp   = Stocks::hasPeak(q);
             float pPct = Stocks::peakPct(q);
-            char  pBuf[12];
-            if (hp) snprintf(pBuf, sizeof(pBuf), "%+.2f%%", pPct);
-            else    snprintf(pBuf, sizeof(pBuf), "--");
-            uint16_t pCol = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
-            tft.setTextSize(1);
-            int pW    = tft.textWidth(pBuf);
-            int pNumX = SCREEN_W - 24 - pW;
-            int p1X   = pNumX - tft.textWidth("52W") - 5;
+            char  pBuf[20];
+            if      (!hp)              snprintf(pBuf, sizeof(pBuf), "52w --");
+            else if (pPct >= -0.05f)   snprintf(pBuf, sizeof(pBuf), "at 52w high");
+            else                       snprintf(pBuf, sizeof(pBuf), "%.1f%% off high", -pPct);
             tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(p1X, cy + 21);
-            tft.print("52W");
-            tft.setTextColor(pCol, rowBg);
-            tft.setCursor(pNumX, cy + 21);
+            tft.setCursor(SCREEN_W - 16 - tft.textWidth(pBuf), cTop + 26);
             tft.print(pBuf);
-
-            // Alert dot — in the right margin, clear of both figures.
-            if (q.alertTriggered) {
-                tft.fillCircle(SCREEN_W - 12, cy + 16, 3, theme.gold);
-            }
         }
 
-        // Separator
-        if (shown < orderCount - 1) {
+        // Hairline separator between rows.
+        if (shown < orderCount - 1 && shown < 4) {
             tft.drawFastHLine(20, ry + ROW_H - 1, SCREEN_W - 40, theme.separator);
         }
         shown++;
@@ -1462,6 +1518,7 @@ static void drawStocksPanel() {
     drawPanelChevrons();
 
     if (shown == 0) {
+        tft.setFreeFont(nullptr);
         tft.setTextSize(2);
         tft.setTextColor(theme.textDim, theme.panel);
         tft.setCursor(20, LAYOUT_PANEL_Y + 88);
@@ -1484,7 +1541,7 @@ static void drawBreakPanel() {
     int yPos = cardY + 12;
 
     // Title
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     tft.setTextColor(theme.accent, theme.panel);
     const char* title = "Time for a Break!";
@@ -1644,7 +1701,7 @@ static void drawBannerIfActive() {
 
     // Only draw text once animation is mostly done
     if (h >= BANNER_H - 4) {
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
         tft.setTextColor(theme.textPri, bg);
 
@@ -1819,7 +1876,7 @@ static void showSplash() {
 
     // ── Wordmark ──
     tft.setTextSize(1);
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setFreeFont(&MontserratBold18pt7b);
     tft.setTextColor(theme.accent, theme.bg);
     String title = "DeskNexus";
     int tw = tft.textWidth(title);
@@ -1907,7 +1964,7 @@ static void showAPSetupScreen() {
     tft.fillScreen(setupTheme.bg);
 
     // Title
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     tft.setTextColor(setupTheme.accent, setupTheme.bg);
     const char* title = "DeskNexus Setup";
@@ -2009,7 +2066,7 @@ static void showConnectingScreen(const char* ssid) {
     tft.fillRoundRect(20, 80, SCREEN_W - 40, 160, 14, setupTheme.panel);
 
     // Title
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     tft.setTextColor(setupTheme.textPri, setupTheme.panel);
     const char* title = "Connecting...";
@@ -2050,7 +2107,7 @@ static void showConnectionResult(bool success, const char* detail) {
         tft.drawLine(SCREEN_W/2 - 9, 120, SCREEN_W/2 - 1, 130, TFT_WHITE);
         tft.drawLine(SCREEN_W/2 - 1, 130, SCREEN_W/2 + 11, 112, TFT_WHITE);
 
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
         tft.setTextColor(setupTheme.green, setupTheme.panel);
         const char* ok = "Connected!";
@@ -2073,7 +2130,7 @@ static void showConnectionResult(bool success, const char* detail) {
         tft.drawLine(SCREEN_W/2 - 9, 110, SCREEN_W/2 + 11, 130, TFT_WHITE);
         tft.drawLine(SCREEN_W/2 + 11, 110, SCREEN_W/2 - 9, 130, TFT_WHITE);
 
-        tft.setFreeFont(&FreeSansBold9pt7b);
+        tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
         tft.setTextColor(setupTheme.red, setupTheme.panel);
         const char* fail = "Connection Failed";
@@ -2121,7 +2178,7 @@ static void drawWizardWelcome() {
     tft.fillCircle(cx, iy + 42, 2, setupTheme.green);
 
     // Title
-    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setFreeFont(&MontserratBold18pt7b);
     tft.setTextSize(1);
     tft.setTextColor(setupTheme.textPri, setupTheme.bg);
     const char* title = "Welcome";
@@ -2129,7 +2186,7 @@ static void drawWizardWelcome() {
     tft.setCursor((SCREEN_W - tw) / 2, 175);
     tft.print(title);
 
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextColor(setupTheme.accent, setupTheme.bg);
     const char* sub = "DeskNexus";
     tw = tft.textWidth(sub);
@@ -2160,7 +2217,7 @@ static void drawWizardConfigHint() {
     // Card
     tft.fillRoundRect(16, 40, SCREEN_W - 32, 240, 14, setupTheme.panel);
 
-    tft.setFreeFont(&FreeSansBold9pt7b);
+    tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     tft.setTextColor(setupTheme.textPri, setupTheme.panel);
     const char* title = "Customize Your Desk";
