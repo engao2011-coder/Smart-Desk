@@ -140,15 +140,15 @@
 // Uses Yahoo Finance (no API key required).
 // Symbol format: TICKER.EXCHANGE  e.g. "IUSE.L", "IUSD.DE", "PPFB.DE"
 // ---------------------------------------------------------------------------
-#define MAX_STOCKS      5
+#define MAX_STOCKS      10
 
 // Stock symbols to monitor (fill up to MAX_STOCKS, leave extras as "")
+// Any slots not listed here are left empty; add or remove freely in the web
+// portal (Settings → Stocks) up to MAX_STOCKS.
 static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
     "IUSE.L",
     "IUSD.DE",
     "PPFB.DE",
-    "",
-    "",
 };
 
 // How often to refresh stock data (milliseconds)
