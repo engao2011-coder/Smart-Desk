@@ -461,12 +461,28 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
 }
 
 // ---------------------------------------------------------------------------
+// Returns a weather icon accent color that is visible in both themes.
+// Light theme: sunny (0xFEE0 yellow), snow (0xFFFF white), and cloudy
+// (0xC618 light gray) are near-invisible against the white/light-gray
+// background — remap them to theme-safe colors.
+// ---------------------------------------------------------------------------
+static uint16_t weatherAccent(const String& code) {
+    if (!isDarkTheme) {
+        if (code.startsWith("01"))                      return theme.accent;   // deep amber — sunny
+        if (code.startsWith("13"))                      return theme.textSec;  // slate — snow
+        if (code.startsWith("02") || code.startsWith("03") ||
+            code.startsWith("04") || code.startsWith("50")) return theme.textSec;  // slate — cloudy/fog
+    }
+    return Weather::iconColor(code);
+}
+
+// ---------------------------------------------------------------------------
 // Geometric weather icon drawing (24×24 around cx,cy)
 // ---------------------------------------------------------------------------
 static void drawWeatherIcon(int cx, int cy, const String& code) {
     if (code.startsWith("01")) {
         // Sunny — filled circle + 8 rays
-        uint16_t col = 0xFEE0;
+        uint16_t col = isDarkTheme ? 0xFEE0 : theme.accent;
         tft.fillCircle(cx, cy, 7, col);
         for (int a = 0; a < 360; a += 45) {
             float r1 = 10, r2 = 13;
@@ -479,9 +495,10 @@ static void drawWeatherIcon(int cx, int cy, const String& code) {
         }
     } else if (code.startsWith("02")) {
         // Partly cloudy — small sun + overlapping cloud
-        tft.fillCircle(cx + 5, cy - 4, 5, 0xFEE0);
-        tft.drawLine(cx + 5, cy - 12, cx + 5, cy - 10, 0xFEE0);
-        tft.drawLine(cx + 12, cy - 4, cx + 10, cy - 4, 0xFEE0);
+        uint16_t sunCol = isDarkTheme ? 0xFEE0 : theme.accent;
+        tft.fillCircle(cx + 5, cy - 4, 5, sunCol);
+        tft.drawLine(cx + 5, cy - 12, cx + 5, cy - 10, sunCol);
+        tft.drawLine(cx + 12, cy - 4, cx + 10, cy - 4, sunCol);
         tft.fillCircle(cx - 4, cy + 2, 6, theme.textDim);
         tft.fillCircle(cx + 4, cy, 7, theme.textDim);
         tft.fillRect(cx - 10, cy + 4, 20, 6, theme.textDim);
@@ -503,8 +520,9 @@ static void drawWeatherIcon(int cx, int cy, const String& code) {
         tft.fillCircle(cx - 3, cy - 5, 6, 0x7BEF);
         tft.fillCircle(cx + 5, cy - 6, 7, 0x7BEF);
         tft.fillRect(cx - 9, cy - 1, 20, 5, 0x7BEF);
-        tft.fillTriangle(cx, cy + 3, cx - 4, cy + 8, cx + 2, cy + 8, 0xFEE0);
-        tft.fillTriangle(cx - 2, cy + 7, cx - 6, cy + 13, cx + 1, cy + 13, 0xFEE0);
+        uint16_t boltCol = isDarkTheme ? 0xFEE0 : theme.accent;
+        tft.fillTriangle(cx, cy + 3, cx - 4, cy + 8, cx + 2, cy + 8, boltCol);
+        tft.fillTriangle(cx - 2, cy + 7, cx - 6, cy + 13, cx + 1, cy + 13, boltCol);
     } else if (code.startsWith("13")) {
         // Snow — cloud + 3 dots
         tft.fillCircle(cx - 3, cy - 4, 6, theme.textSec);
@@ -544,7 +562,7 @@ static inline void uiSmallFont() {
 // ---------------------------------------------------------------------------
 static void drawTrackedLabel(int x, int y, const char* text, uint16_t color) {
     uiSmallFont();
-    tft.setTextColor(color, theme.bg);
+    tft.setTextColor(color, theme.panel);
     int cx = x;
     for (const char* p = text; *p; ++p) {
         char ch[2] = {*p, 0};
@@ -565,12 +583,13 @@ static const char* const PRAYER_MON[12] = {"JAN","FEB","MAR","APR","MAY","JUN",
 
 static void drawPrayerPanel() {
     fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
+    tft.fillRoundRect(8, 8, SCREEN_W - 16, SCREEN_H - 16, 12, theme.panel);
     tft.setFreeFont(nullptr);
     tft.setTextSize(1);
 
     if (!Prayer::current.valid) {
         tft.setFreeFont(&MontserratBold9pt7b);
-        tft.setTextColor(theme.textDim, theme.bg);
+        tft.setTextColor(theme.textDim, theme.panel);
         const char* m = "Prayer times loading...";
         tft.setCursor((SCREEN_W - tft.textWidth(m)) / 2, SCREEN_H / 2);
         tft.print(m);
@@ -607,7 +626,7 @@ static void drawPrayerPanel() {
     const char* city = Settings::city;
     int cityW = tft.textWidth(city);
     int cityX = SCREEN_W - PAD - cityW;
-    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(cityX, 8);
     tft.print(city);
     tft.fillCircle(cityX - 9, 11, 3, Network::isConnected() ? theme.green : theme.red);
@@ -620,11 +639,11 @@ static void drawPrayerPanel() {
     // never collide on the 240px-wide row.
     tft.setTextSize(1);
     tft.setFreeFont(&MontserratBold14pt7b);
-    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setTextColor(theme.textPri, theme.panel);
     tft.setCursor(PAD - 1, 72);
     tft.print(hName);
 
-    tft.setTextColor(theme.gold, theme.bg);
+    tft.setTextColor(theme.gold, theme.panel);
     tft.setCursor(SCREEN_W - PAD - tft.textWidth(hTime), 72);
     tft.print(hTime);
 
@@ -636,7 +655,7 @@ static void drawPrayerPanel() {
         if (h > 0) snprintf(cdb, sizeof(cdb), "in %dh %02dm", h, m);
         else       snprintf(cdb, sizeof(cdb), "in %dm", m);
     } else strncpy(cdb, "--", sizeof(cdb));
-    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(PAD, 82);
     tft.print(cdb);
 
@@ -661,7 +680,7 @@ static void drawPrayerPanel() {
     if (P.hijriValid) {
         tft.setFreeFont(&MontserratBold9pt7b);
         tft.setTextSize(1);
-        tft.setTextColor(theme.textSec, theme.bg);
+        tft.setTextColor(theme.textSec, theme.panel);
         tft.setCursor((SCREEN_W - tft.textWidth(P.hijriDate)) / 2, 124);
         tft.print(P.hijriDate);
     }
@@ -680,7 +699,7 @@ static void drawPrayerPanel() {
         bool isSunrise = (i == 1);
         bool isPast    = (nowMin >= 0) && (Prayer::toMinutes(P.prayers[i].time) <= nowMin) && !isNext;
 
-        uint16_t rowBg = theme.bg, nameCol, timeCol;
+        uint16_t rowBg = theme.panel, nameCol, timeCol;
         if (isNext) {
             rowBg = theme.highlightBg;
             tft.fillRect(8, ry + 1, SCREEN_W - 16, ROW_H - 2, rowBg);
@@ -788,7 +807,7 @@ static void drawHomeLabel(int x, int y, const char* text, uint16_t color) {
 // Centre a short message vertically in a band (loading / no-data states).
 static void drawHomeBandMsg(int bandY, int bandH, const char* msg) {
     uiSmallFont();
-    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(HOME_PAD, bandY + bandH / 2 + 5);
     tft.print(msg);
 }
@@ -799,7 +818,7 @@ static void drawHomeBanner() {
     struct tm t; bool ok = getLocalTime(&t);
     bool wifi = Network::isConnected();
 
-    tft.fillRect(0, HOME_HERO_Y, SCREEN_W, HOME_HERO_H, theme.bg);
+    tft.fillRect(0, HOME_HERO_Y, SCREEN_W, HOME_HERO_H, theme.panel);
 
     // Status line — date (left) + week number, with a small WiFi dot.
     if (ok) {
@@ -816,7 +835,7 @@ static void drawHomeBanner() {
     if (wi >= 0) {
         String wk = g_homeDateStr.substring(wi);
         tft.setFreeFont(nullptr); tft.setTextSize(1);
-        tft.setTextColor(theme.textDim, theme.bg);
+        tft.setTextColor(theme.textDim, theme.panel);
         int wkW = tft.textWidth(wk.c_str());
         tft.setCursor(rightX - wkW, HOME_HERO_Y + 16);
         tft.print(wk);
@@ -830,7 +849,7 @@ static void drawHomeBanner() {
     else    strncpy(hm, "--:--", sizeof(hm));
     tft.setTextSize(1);
     tft.setFreeFont(&MontserratBold22pt7b);   // 22pt: clears the weather chip even at "00:00"
-    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setTextColor(theme.textPri, theme.panel);
     tft.setCursor(HOME_PAD - 2, HOME_HERO_Y + 92);
     tft.print(hm);
 
@@ -847,11 +866,11 @@ static void drawHomeWeatherTile() {
     const int chipX = HOME_WEATHER_X;
     const int chipY = HOME_HERO_Y + 26;
     const int chipW = SCREEN_W - chipX - HOME_PAD;
-    tft.fillRect(chipX, chipY, chipW + HOME_PAD, 64, theme.bg);
+    tft.fillRect(chipX, chipY, chipW + HOME_PAD, 64, theme.panel);
 
     if (!Weather::current.valid) {
         uiSmallFont();
-        tft.setTextColor(theme.textDim, theme.bg);
+        tft.setTextColor(theme.textDim, theme.panel);
         const char* m = (Weather::current.fetchState == Weather::WEATHER_NO_KEY)
                         ? "add API key" : "weather ...";
         tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(m), chipY + 30 + UI_SMALL_CAP);
@@ -859,7 +878,7 @@ static void drawHomeWeatherTile() {
         return;
     }
     const Weather::Data& wd = Weather::current;
-    uint16_t accent = Weather::iconColor(wd.iconCode);
+    uint16_t accent = weatherAccent(wd.iconCode);
     const int rightX = SCREEN_W - HOME_PAD;
 
     // Line 1 — temperature (right-aligned) with the icon to its left.
@@ -871,13 +890,13 @@ static void drawHomeWeatherTile() {
     const int degW = 14;            // degree ring + unit glyph
     const int tBase = chipY + 34;
     const int tX = rightX - numW - degW;
-    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setTextColor(theme.textPri, theme.panel);
     tft.setCursor(tX, tBase);
     tft.print(nb);
     int dX = tX + numW;
     tft.drawCircle(dX + 4, tBase - 17, 2, theme.textSec);   // degree ring
     tft.setFreeFont(&MontserratBold9pt7b);
-    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setTextColor(theme.textSec, theme.panel);
     tft.setCursor(dX + 8, tBase - 3);
     tft.print(unit);
 
@@ -886,7 +905,7 @@ static void drawHomeWeatherTile() {
 
     // Line 2 — condition label (right-aligned, accent colour).
     uiSmallFont();
-    tft.setTextColor(accent, theme.bg);
+    tft.setTextColor(accent, theme.panel);
     const char* lbl = Weather::iconLabel(wd.iconCode);
     tft.setCursor(rightX - tft.textWidth(lbl), chipY + 50 + UI_SMALL_CAP);
     tft.print(lbl);
@@ -894,7 +913,7 @@ static void drawHomeWeatherTile() {
 
 // Next-prayer band — label, name (amber), time, countdown + progress bar.
 static void drawHomePrayerTile() {
-    tft.fillRect(0, HOME_PRA_Y, SCREEN_W, HOME_PRA_H, theme.bg);
+    tft.fillRect(0, HOME_PRA_Y, SCREEN_W, HOME_PRA_H, theme.panel);
     const int top = HOME_PRA_Y + 16;
 
     if (!Prayer::current.valid) { drawHomeBandMsg(HOME_PRA_Y, HOME_PRA_H, "Prayers ...");
@@ -921,11 +940,11 @@ static void drawHomePrayerTile() {
     // Name (left) + time (right), on a shared baseline well below the label.
     tft.setFreeFont(&MontserratBold12pt7b);
     tft.setTextSize(1);
-    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setTextColor(theme.textPri, theme.panel);
     tft.setCursor(HOME_PAD - 1, top + 34);
     tft.print(name);
 
-    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setTextColor(theme.textSec, theme.panel);
     tft.setCursor(rightX - tft.textWidth(tm), top + 34);
     tft.print(tm);
 
@@ -937,7 +956,7 @@ static void drawHomePrayerTile() {
         if (h > 0) snprintf(cdb, sizeof(cdb), "in %dh %02dm", h, m);
         else       snprintf(cdb, sizeof(cdb), "in %dm", m);
     } else strncpy(cdb, "--", sizeof(cdb));
-    tft.setTextColor(theme.textDim, theme.bg);
+    tft.setTextColor(theme.textDim, theme.panel);
     tft.setCursor(HOME_PAD, top + 52 + UI_SMALL_CAP);
     tft.print(cdb);
 
@@ -965,7 +984,7 @@ static void drawHomePrayerTile() {
 // Markets band — top-moving stock: name + price (left), daily change (right),
 // with a coloured rail on the left signalling up/down.
 static void drawHomeStocksTile() {
-    tft.fillRect(0, HOME_STK_Y, SCREEN_W, HOME_STK_H, theme.bg);
+    tft.fillRect(0, HOME_STK_Y, SCREEN_W, HOME_STK_H, theme.panel);
     const int top = HOME_STK_Y + 14;
 
     drawHomeLabel(HOME_PAD, top, "MARKETS", theme.textDim);
@@ -988,7 +1007,7 @@ static void drawHomeStocksTile() {
     tft.setFreeFont(&MontserratBold9pt7b);
     tft.setTextSize(1);
     fitTextToWidth(Stocks::displayName(q), 120, nb, sizeof(nb));
-    tft.setTextColor(theme.textPri, theme.bg);
+    tft.setTextColor(theme.textPri, theme.panel);
     tft.setCursor(nameX, rowY + 14);
     tft.print(nb);
 
@@ -996,14 +1015,14 @@ static void drawHomeStocksTile() {
     if (Settings::stockEuro) snprintf(pb, sizeof(pb), "EUR %.2f", Stocks::euroPrice(q));
     else                     snprintf(pb, sizeof(pb), "$%.2f", q.price);
     uiSmallFont();
-    tft.setTextColor(theme.textSec, theme.bg);
+    tft.setTextColor(theme.textSec, theme.panel);
     tft.setCursor(nameX, rowY + 28 + UI_SMALL_CAP);
     tft.print(pb);
 
     // Right block, line 1: daily change (1D).
     char cb[16]; snprintf(cb, sizeof(cb), "%+.2f%%", mPct);
     tft.setFreeFont(&MontserratBold9pt7b);
-    tft.setTextColor(pc, theme.bg);
+    tft.setTextColor(pc, theme.panel);
     tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(cb), rowY + 14);
     tft.print(cb);
 
@@ -1015,13 +1034,14 @@ static void drawHomeStocksTile() {
     else    snprintf(p52, sizeof(p52), "52W --");
     uint16_t p52col = !hp ? theme.textDim : ((pPct >= 0) ? theme.green : theme.red);
     uiSmallFont();
-    tft.setTextColor(p52col, theme.bg);
+    tft.setTextColor(p52col, theme.panel);
     tft.setCursor(SCREEN_W - HOME_PAD - tft.textWidth(p52), rowY + 30 + UI_SMALL_CAP);
     tft.print(p52);
 }
 
 static void drawHomePanel() {
     fillPanel(0, SCREEN_H, theme.bg);
+    tft.fillRoundRect(8, 8, SCREEN_W - 16, SCREEN_H - 16, 12, theme.panel);
     drawHomeBanner();
     drawHomeWeatherTile();
     drawHomePrayerTile();
@@ -1255,7 +1275,7 @@ static void drawForecastPanel() {
         int ry = START_Y + shown * ROW_H;   // slot top
         int cy = ry + vpad;                  // centred content top
         uint16_t rowBg = theme.panel;
-        uint16_t accent = Weather::iconColor(d.iconCode);
+        uint16_t accent = weatherAccent(d.iconCode);
 
         // Left edge bar (5px) coloured by weather condition — fills the slot
         tft.fillRect(cardX + 6, ry + 2, 5, ROW_H - 6, accent);
