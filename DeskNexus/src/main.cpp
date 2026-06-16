@@ -7,7 +7,7 @@
  *  • Daily prayer times (Aladhan API)
  *  • Stock price monitor (Yahoo Finance)
  *  • Hybrid WiFi (STA first → AP captive-portal fallback)
- *  • Touch-based tab navigation
+ *  • Home dashboard with tile-tap navigation to detail pages
  *  • Auto-dim backlight
  *
  * Hardware: 2.8" ILI9341 TFT (240×320) + XPT2046 touch

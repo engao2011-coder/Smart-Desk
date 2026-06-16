@@ -1,7 +1,23 @@
 /*
- * location_time.h — Automatic city/timezone detection from internet
+ * location_time.h — Automatic city / timezone detection
  *
- * Runs at boot after WiFi connect and updates Settings::city/country/utcOffset.
+ * On every STA-mode boot, detectAndApply() queries ipwho.is (a free
+ * geo-IP JSON service) to resolve the device's public IP address into a
+ * city name, ISO country code, and UTC offset in seconds. The result is
+ * written into Settings and saved to NVS, then applied immediately via
+ * TimeSync::apply() so subsequent weather and prayer fetches use the
+ * correct local date and time.
+ *
+ * Compile gate: set AUTO_DETECT_LOCATION_TIME to false in config.h to
+ * disable the feature entirely (detectAndApply() becomes a no-op and
+ * the manual NTP_UTC_OFFSET_SEC value in config.h is used instead).
+ *
+ * City-lock: when the user has manually set the city via the web settings
+ * page, Settings::cityManual is true and detectAndApply() updates only the
+ * UTC offset — the city and country fields are left unchanged.
+ *
+ * Status metadata (autoDetectLastOk, autoDetectLastEpoch, autoDetectStatus)
+ * is persisted to NVS (keys: adOK, adTS, adMsg) and shown on the /status page.
  */
 
 #pragma once

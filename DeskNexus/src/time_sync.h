@@ -1,3 +1,25 @@
+/*
+ * time_sync.h — NTP Time Synchronisation Helper
+ *
+ * Wraps configTime() with a reapply guard so calling code can invoke
+ * apply() freely without spamming NTP servers or triggering the
+ * "addApbChangeCallback" duplicate-registration warning that fires when
+ * configTime() is called more than once in quick succession.
+ *
+ * apply(utcOffset, force)
+ *   Calls configTime() only when the UTC offset has changed or force=true.
+ *   A 15-second guard window prevents repeated calls within the same boot cycle.
+ *
+ * readLocalTimeStable(out, consecutiveReads, settleMs)
+ *   Reads local time N times with a short settle delay between reads and
+ *   returns the last sample. Avoids jitter from a single getLocalTime()
+ *   call made immediately after an NTP sync.
+ *
+ * Usage in main.cpp:
+ *   setup():             TimeSync::apply(Settings::utcOffset);
+ *   After auto-detect:   TimeSync::apply(detectedOffset, /*force=*\/true);
+ */
+
 #pragma once
 
 #include <Arduino.h>
