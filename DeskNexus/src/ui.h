@@ -19,7 +19,6 @@
  *  PAGE_PRAYER  (1) — full-screen prayer time list with Azan alert buttons
  *  PAGE_FORECAST(2) — full-screen 5-day weather forecast
  *  PAGE_STOCKS  (3) — full-screen stock/ETF quote list
- *  PAGE_BREAK   (4) — full-screen break reminder prompt
  *
  * ── Navigation ──────────────────────────────────────────────────────────────
  *  • Tap the Weather chip (right side of Hero)  → opens Forecast
@@ -150,8 +149,7 @@ static int LAYOUT_PANEL_H = PANEL_H_FULL;
 #define PAGE_PRAYER    1
 #define PAGE_FORECAST  2
 #define PAGE_STOCKS    3
-#define PAGE_BREAK     4
-#define PAGE_COUNT     5
+#define PAGE_COUNT     4
 
 namespace UI {
 
@@ -192,11 +190,6 @@ static unsigned long carouselPauseDuration = 0;  // 0 = not paused
 // Page dot pulse animation
 static unsigned long dotPulseStart      = 0;
 
-// Break reminder state
-static unsigned long breakLastNotify    = 0;     // millis() of last break notification
-static bool          breakScreenActive  = false;  // full-screen break reminder showing
-static unsigned long breakScreenStart   = 0;      // when break screen was shown (for duration calc)
-
 // ── Touch calibration ─────────────────────────────────────────────────────
 static uint16_t calData[5] = TOUCH_CAL_DATA;
 
@@ -207,7 +200,6 @@ static void fillPanel(int y, int h, uint16_t color) {
 
 // Forward declarations for functions used before their definition
 static void playPanelTransition(int direction);
-static void dismissBreakReminder();
 static void showBanner(const char* text, uint32_t durationMs, BannerStyle style);
 static void drawPanelChevrons();
 
@@ -281,7 +273,6 @@ static void begin() {
 
     lastTouchMs      = millis();
     lastPageSwitch   = millis();
-    breakLastNotify  = millis();  // start counting from boot
 }
 
 // ---------------------------------------------------------------------------
@@ -316,9 +307,6 @@ static bool isPageAllowed(int page) {
     }
     if (page == PAGE_FORECAST) {
         return Network::isConnected() && Weather::forecast.valid;
-    }
-    if (page == PAGE_BREAK) {
-        return Settings::breakReminderEnabled;
     }
     return true;
 }
@@ -416,26 +404,6 @@ static bool handleTouch(uint16_t tx, uint16_t ty) {
             dismissAzanScreen();
             return true;
         }
-        return true;
-    }
-
-    // Break reminder page — dismiss button
-    if (activePage == PAGE_BREAK && (int)ty >= LAYOUT_PANEL_Y) {
-        const int cardX = 8, cardW = SCREEN_W - 16;
-        const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
-        const int btnW = 120, btnH = 32;
-        const int btnX = cardX + (cardW - btnW) / 2;
-        const int btnY = cardY + cardH - btnH - 12;
-        if ((int)tx >= btnX && (int)tx < btnX + btnW &&
-            (int)ty >= btnY && (int)ty < btnY + btnH) {
-            // Flash button feedback
-            tft.fillRoundRect(btnX, btnY, btnW, btnH, 8, theme.textDim);
-            delay(120);
-            dismissBreakReminder();
-            return true;
-        }
-        // Any tap on break page dismisses it
-        dismissBreakReminder();
         return true;
     }
 
@@ -1360,6 +1328,60 @@ static uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
 }
 
 // ---------------------------------------------------------------------------
+// Sparkline — draws a polyline of `count` price points into the rect (x,y,w,h).
+// Oldest point is prices[0], newest is prices[count-1].
+// lineCol: stroke colour; bgCol: background the line is drawn on (for area fill).
+// If count < 2 a flat mid-line is drawn.
+// ---------------------------------------------------------------------------
+static void drawSparkline(int x, int y, int w, int h,
+                           const float* prices, int count,
+                           uint16_t lineCol, uint16_t bgCol) {
+    if (w <= 0 || h <= 0) return;
+
+    if (count < 2) {
+        // Flat line at vertical midpoint
+        tft.drawFastHLine(x, y + h / 2, w, lineCol);
+        return;
+    }
+
+    // Find price range
+    float pmin = prices[0], pmax = prices[0];
+    for (int i = 1; i < count; i++) {
+        if (prices[i] < pmin) pmin = prices[i];
+        if (prices[i] > pmax) pmax = prices[i];
+    }
+    float range = pmax - pmin;
+    if (range < 0.0001f) range = 1.0f;  // flat dataset — avoid div-by-zero
+
+    // Map price index → pixel X; price value → pixel Y (inverted: high = top).
+    auto priceToX = [&](int i) -> int {
+        return x + (int)((float)i / (float)(count - 1) * (float)(w - 1));
+    };
+    auto priceToY = [&](float p) -> int {
+        return y + h - 1 - (int)(((p - pmin) / range) * (float)(h - 1));
+    };
+
+    // Subtle area fill below the line (blend lineCol into bgCol at ~25% opacity)
+    uint16_t fillCol = blend565(lineCol, bgCol, 64);
+    int baseY = y + h - 1;
+    for (int i = 0; i < count - 1; i++) {
+        int x0 = priceToX(i),     y0 = priceToY(prices[i]);
+        int x1 = priceToX(i + 1), y1 = priceToY(prices[i + 1]);
+        // Fill columns between segments
+        int xL = x0, xR = x1;
+        for (int cx = xL; cx <= xR; cx++) {
+            // Interpolate y at this column
+            float t = (xR == xL) ? 0.0f : (float)(cx - xL) / (float)(xR - xL);
+            int cy = y0 + (int)(t * (float)(y1 - y0));
+            if (baseY > cy)
+                tft.drawFastVLine(cx, cy + 1, baseY - cy, fillCol);
+        }
+        // Draw the polyline segment on top
+        tft.drawLine(x0, y0, x1, y1, lineCol);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Stocks panel — smooth FreeSans rows with tinted gain/loss chips, matching
 // the Slate & Amber redesign used by the rest of the UI. Sorted by daily mover.
 // ---------------------------------------------------------------------------
@@ -1530,16 +1552,30 @@ static void drawStocksPanel() {
             tft.setCursor(nameX, cTop + 26);
             tft.print(priceBuf);
 
-            // 52-week context (right, line 2): distance below the peak, in words.
-            bool  hp   = Stocks::hasPeak(q);
-            float pPct = Stocks::peakPct(q);
-            char  pBuf[20];
-            if      (!hp)              snprintf(pBuf, sizeof(pBuf), "52w --");
-            else if (pPct >= -0.05f)   snprintf(pBuf, sizeof(pBuf), "at 52w high");
-            else                       snprintf(pBuf, sizeof(pBuf), "%.1f%% off high", -pPct);
-            tft.setTextColor(theme.textDim, rowBg);
-            tft.setCursor(SCREEN_W - 16 - tft.textWidth(pBuf), cTop + 26);
-            tft.print(pBuf);
+            // 52-week sparkline (right, line 2): tiny 60×14px chart.
+            // Falls back to "52w --" text when history hasn't loaded yet.
+            const int spkW  = 60;
+            const int spkH  = 14;
+            const int spkX  = SCREEN_W - 16 - spkW;
+            const int spkY  = cTop + 20;
+            // Clear the sparkline area first (panel bg)
+            tft.fillRect(spkX, spkY, spkW, spkH, rowBg);
+            if (q.weeklyCount >= 2) {
+                // Colour follows first→last direction (green if risen, red if fallen)
+                bool histUp = q.weeklyPrices[q.weeklyCount - 1] >= q.weeklyPrices[0];
+                uint16_t spkCol = histUp ? theme.green : theme.red;
+                drawSparkline(spkX, spkY, spkW, spkH,
+                              q.weeklyPrices, (int)q.weeklyCount,
+                              spkCol, rowBg);
+            } else {
+                // Not yet loaded — show text fallback
+                tft.setFreeFont(nullptr);
+                tft.setTextSize(1);
+                const char* fb = (q.weeklyCount == 0) ? "52w --" : "52w loading";
+                tft.setTextColor(theme.textDim, rowBg);
+                tft.setCursor(SCREEN_W - 16 - tft.textWidth(fb), cTop + 26);
+                tft.print(fb);
+            }
         }
 
         // Hairline separator between rows.
@@ -1557,140 +1593,6 @@ static void drawStocksPanel() {
         tft.setTextColor(theme.textDim, theme.panel);
         tft.setCursor(20, LAYOUT_PANEL_Y + 88);
         tft.print("Fetching...");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Break Reminder panel (PAGE_BREAK)
-// Shows a friendly reminder to take a break, with elapsed time and dismiss.
-// ---------------------------------------------------------------------------
-static void drawBreakPanel() {
-    fillPanel(LAYOUT_PANEL_Y, LAYOUT_PANEL_H, theme.bg);
-    tft.setFreeFont(nullptr);
-
-    const int cardX = 8, cardW = SCREEN_W - 16;
-    const int cardY = LAYOUT_PANEL_Y + 8, cardH = LAYOUT_PANEL_H - 16;
-    tft.fillRoundRect(cardX, cardY, cardW, cardH, 12, theme.panel);
-
-    int yPos = cardY + 12;
-
-    // Title
-    tft.setFreeFont(&MontserratBold9pt7b);
-    tft.setTextSize(1);
-    tft.setTextColor(theme.accent, theme.panel);
-    const char* title = "Time for a Break!";
-    int tw = tft.textWidth(title);
-    tft.setCursor(cardX + (cardW - tw) / 2, yPos + 14);
-    tft.print(title);
-    yPos += 28;
-
-    // Horizontal accent line
-    tft.drawFastHLine(cardX + 20, yPos, cardW - 40, theme.accent);
-    yPos += 10;
-
-    // Body text
-    tft.setFreeFont(nullptr);
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textSec, theme.panel);
-    const char* line1 = "You've been at your desk for";
-    tw = tft.textWidth(line1);
-    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
-    tft.print(line1);
-    yPos += 14;
-
-    // Show how long since last break
-    unsigned long elapsedMs = millis() - breakLastNotify;
-    int elapsedMin = (int)(elapsedMs / 60000UL);
-    if (elapsedMin < 1) elapsedMin = Settings::breakReminderInterval;
-
-    char timeBuf[24];
-    if (elapsedMin >= 60) {
-        int hrs = elapsedMin / 60;
-        int mins = elapsedMin % 60;
-        if (mins > 0)
-            snprintf(timeBuf, sizeof(timeBuf), "%dh %dm", hrs, mins);
-        else
-            snprintf(timeBuf, sizeof(timeBuf), "%d hour%s", hrs, hrs > 1 ? "s" : "");
-    } else {
-        snprintf(timeBuf, sizeof(timeBuf), "%d min", elapsedMin);
-    }
-
-    tft.setTextSize(2);
-    tft.setTextColor(theme.gold, theme.panel);
-    tw = tft.textWidth(timeBuf);
-    tft.setCursor(cardX + (cardW - tw) / 2, yPos + 4);
-    tft.print(timeBuf);
-    yPos += 30;
-
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textSec, theme.panel);
-    const char* line2 = "Stand up, stretch, and rest";
-    tw = tft.textWidth(line2);
-    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
-    tft.print(line2);
-    yPos += 12;
-    const char* line3 = "your eyes for a moment.";
-    tw = tft.textWidth(line3);
-    tft.setCursor(cardX + (cardW - tw) / 2, yPos);
-    tft.print(line3);
-    yPos += 20;
-
-    // "Dismiss" button
-    const int btnW = 120, btnH = 32;
-    const int btnX = cardX + (cardW - btnW) / 2;
-    const int btnY = cardY + cardH - btnH - 12;
-    tft.fillRoundRect(btnX, btnY, btnW, btnH, 8, theme.green);
-    tft.setTextSize(2);
-    tft.setTextColor(theme.textPri, theme.green);
-    const char* btnLabel = "OK";
-    tw = tft.textWidth(btnLabel);
-    tft.setCursor(btnX + (btnW - tw) / 2, btnY + 8);
-    tft.print(btnLabel);
-
-    // Interval info at bottom
-    tft.setTextSize(1);
-    tft.setTextColor(theme.textDim, theme.panel);
-    char intBuf[32];
-    snprintf(intBuf, sizeof(intBuf), "Reminder every %d min", Settings::breakReminderInterval);
-    tw = tft.textWidth(intBuf);
-    tft.setCursor(cardX + (cardW - tw) / 2, btnY - 14);
-    tft.print(intBuf);
-}
-
-// Helper: dismiss break reminder and reset timer
-static void dismissBreakReminder() {
-    breakScreenActive = false;
-    breakLastNotify = millis();
-    if (activePage == PAGE_BREAK) {
-        activePage = PAGE_HOME;
-    }
-    needsRedraw = true;
-}
-
-// Check if a break reminder should fire
-static bool shouldFireBreakReminder() {
-    if (!Settings::breakReminderEnabled) return false;
-    if (breakScreenActive) return false;
-    unsigned long intervalMs = (unsigned long)Settings::breakReminderInterval * 60UL * 1000UL;
-    return (millis() - breakLastNotify) >= intervalMs;
-}
-
-// Fire break reminder: show banner and switch to break page
-static void fireBreakReminder() {
-    breakScreenActive = true;
-    breakScreenStart  = millis();
-    wake();
-    showBanner("Take a break!", BREAK_REMINDER_BANNER_MS, BANNER_GOLD);
-    pauseCarousel();
-    activePage = PAGE_BREAK;
-    needsRedraw = true;
-    Serial.println("[Break] Reminder fired.");
-}
-
-// Auto-dismiss break screen after expiry (rollover-safe)
-static void updateBreakState() {
-    if (breakScreenActive && (millis() - breakScreenStart) >= BREAK_REMINDER_SCREEN_MS) {
-        dismissBreakReminder();
     }
 }
 
@@ -1815,7 +1717,6 @@ static void redraw(bool wifiOk, const String& ipAddr,
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
-        case PAGE_BREAK:    drawBreakPanel();    break;
     }
 
     drawBannerIfActive();
@@ -1867,7 +1768,6 @@ static void updatePanel() {
         case PAGE_PRAYER:   drawPrayerPanel();   break;
         case PAGE_FORECAST: drawForecastPanel(); break;
         case PAGE_STOCKS:   drawStocksPanel();   break;
-        case PAGE_BREAK:    drawBreakPanel();    break;
     }
 }
 

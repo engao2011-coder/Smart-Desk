@@ -64,10 +64,6 @@ static int themeMode = 0;
 // When true, auto-detect will NOT overwrite city/country (user set it manually)
 static bool cityManual = false;
 
-// Break Reminder
-static bool breakReminderEnabled  = BREAK_REMINDER_ENABLED;
-static int  breakReminderInterval = BREAK_REMINDER_INTERVAL_M;  // minutes
-
 // Stocks currency display — when true prices are converted to EUR
 static bool stockEuro = false;
 
@@ -152,9 +148,6 @@ static void load() {
     }
     cityManual = prefs.getBool("cityM", cityManual);
 
-    breakReminderEnabled  = prefs.getBool("brkEn", breakReminderEnabled);
-    breakReminderInterval = prefs.getInt("brkInt", breakReminderInterval);
-
     stockEuro = prefs.getBool("stkEur", stockEuro);
     stockRefreshMin = prefs.getInt("stkRef", stockRefreshMin);
     prefs.getString("admPw", adminPassword, sizeof(adminPassword));
@@ -202,9 +195,6 @@ static void save() {
     prefs.putString("adMsg", autoDetectStatus);
     prefs.putBool("cityM", cityManual);
 
-    prefs.putBool("brkEn", breakReminderEnabled);
-    prefs.putInt("brkInt", breakReminderInterval);
-
     prefs.putBool("stkEur", stockEuro);
     prefs.putInt("stkRef", stockRefreshMin);
     prefs.putString("admPw", adminPassword);
@@ -248,9 +238,6 @@ static void resetToDefaults() {
     strncpy(autoDetectStatus, "Never run", sizeof(autoDetectStatus) - 1);
     autoDetectStatus[sizeof(autoDetectStatus) - 1] = '\0';
     cityManual = false;
-
-    breakReminderEnabled  = BREAK_REMINDER_ENABLED;
-    breakReminderInterval = BREAK_REMINDER_INTERVAL_M;
 
     stockEuro = false;
     stockRefreshMin = STOCK_REFRESH_MS / 60000;

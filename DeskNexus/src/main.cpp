@@ -525,6 +525,10 @@ void loop() {
                     UI::updatePanel();
                 }
             }
+            // Fetch 52-week history for the next symbol needing an update.
+            // Runs in the same slot so we stay within the existing rate-limit
+            // cadence; fetchNextHistory() self-skips if history is still fresh.
+            Stocks::fetchNextHistory();
         }
     }
 
@@ -543,16 +547,6 @@ void loop() {
         lastPrayerAlert = now;
         UI::updatePrayerUiState();   // expire azan screen if needed
         processPrayerReminderEvent();
-    }
-
-    // ── Break reminder check (every 30 s) ─────────────────────────────────
-    static unsigned long lastBreakCheck = 0;
-    if ((now - lastBreakCheck) >= 30000) {
-        lastBreakCheck = now;
-        UI::updateBreakState();      // auto-dismiss expired break screen
-        if (UI::shouldFireBreakReminder()) {
-            UI::fireBreakReminder();
-        }
     }
 
     // ── Idle return to Home page ──────────────────────────────────────────

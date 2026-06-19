@@ -57,6 +57,11 @@ struct Quote {
     unsigned long fetchedAt = 0;
     FetchStatus status    = STATUS_PENDING;
     uint8_t failCount     = 0;        // consecutive failed fetches (reset on success)
+
+    // 52-week history (weekly close prices, oldest-first, up to 52 entries)
+    float   weeklyPrices[52] = {};   // [0] = oldest week, [weeklyCount-1] = most recent
+    uint8_t weeklyCount      = 0;    // populated entries (0 = not yet fetched)
+    unsigned long histFetchedAt = 0; // millis() of last successful history fetch
 };
 
 static Quote quotes[MAX_STOCKS];
@@ -65,6 +70,7 @@ static int   displayIndex = 0;       // which quote to show on screen
 
 static constexpr unsigned long FETCH_RETRY_INTERVAL_MS  = 60000;   // 60 s backoff after failure
 static constexpr unsigned long RATE_REFRESH_INTERVAL_MS = 900000;  // 15 min between rate refreshes
+static constexpr unsigned long HISTORY_REFRESH_MS       = 14400000UL; // 4 h between history fetches
 static unsigned long lastFetchAttemptMs = 0;
 static bool          lastFetchOk        = true;
 
@@ -268,6 +274,9 @@ static void cleanCompanyName(const char* src, char* dst, size_t dstSz) {
             if (strcmp(low, STOP[s]) == 0) { drop = true; break; }
         if (drop) continue;
 
+        // Word substitutions — shorten known verbose words for display.
+        if (strcmp(low, "physical") == 0) { strncpy(tok, "Phy.", sizeof(tok) - 1); tok[sizeof(tok)-1] = '\0'; ti = strlen(tok); }
+
         // Trim trailing '.'/',' from the kept token before appending.
         while (ti > 0 && (tok[ti - 1] == '.' || tok[ti - 1] == ',')) tok[--ti] = '\0';
         if (ti == 0) continue;
@@ -421,6 +430,103 @@ static bool fetchOne(int idx) {
 }
 
 // ---------------------------------------------------------------------------
+// Fetch 52-week weekly close history for one quote (blocking).
+// Uses Yahoo Finance v8 chart with range=1y&interval=1wk.
+// Returns true on success, false on any error.
+// ---------------------------------------------------------------------------
+static bool fetchHistory(int idx) {
+    if (idx < 0 || idx >= MAX_STOCKS) return false;
+    const char* sym = Settings::stockSymbols[idx];
+    if (strlen(sym) == 0) return false;
+
+    String url = "https://query1.finance.yahoo.com/v8/finance/chart/"
+                 + String(sym) + "?range=1y&interval=1wk";
+
+    WiFiClientSecure client;
+    client.setInsecure();
+
+    HTTPClient http;
+    http.begin(client, url);
+    http.setTimeout(12000);
+    http.setUserAgent("Mozilla/5.0");
+    int code = http.GET();
+
+    if (code != 200) {
+        Serial.printf("[Stocks/hist] HTTP %d for %s\n", code, sym);
+        http.end();
+        return false;
+    }
+
+    // Filter: only the weekly close array.
+    // The 5-level nested path needs ~192 bytes (7 nodes × 8 B + key strings);
+    // 64 B overflows silently and produces an empty filter, so no data passes.
+    StaticJsonDocument<192> filter;
+    filter["chart"]["result"][0]["indicators"]["quote"][0]["close"] = true;
+
+    // 52 floats + ArduinoJson overhead; 2048 bytes gives safe headroom.
+    StaticJsonDocument<2048> doc;
+    DeserializationError err = deserializeJson(doc, http.getStream(),
+                                               DeserializationOption::Filter(filter));
+    http.end();
+
+    if (err) {
+        Serial.printf("[Stocks/hist] JSON error for %s: %s\n", sym, err.c_str());
+        return false;
+    }
+
+    JsonArray closes = doc["chart"]["result"][0]["indicators"]["quote"][0]["close"];
+    if (closes.isNull()) {
+        Serial.printf("[Stocks/hist] No close data for %s\n", sym);
+        return false;
+    }
+
+    Quote& q = quotes[idx];
+    uint8_t count = 0;
+    for (JsonVariant v : closes) {
+        if (count >= 52) break;
+        float c = v.isNull() ? 0.0f : v.as<float>();
+        if (c > 0.0f) {
+            q.weeklyPrices[count++] = c;
+        }
+    }
+    q.weeklyCount    = count;
+    q.histFetchedAt  = millis();
+
+    Serial.printf("[Stocks/hist] %s: %u weekly closes loaded\n", sym, count);
+    return count > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Round-robin history fetcher — call from loop() at a slower cadence.
+// Returns true when a fetch was attempted (successfully or not).
+// ---------------------------------------------------------------------------
+static int histFetchIndex = 0;
+
+static bool fetchNextHistory() {
+    int n = symbolCount();
+    if (n == 0) return false;
+
+    for (int attempt = 0; attempt < MAX_STOCKS; attempt++) {
+        histFetchIndex = histFetchIndex % MAX_STOCKS;
+        const char* sym = Settings::stockSymbols[histFetchIndex];
+        if (strlen(sym) > 0) {
+            Quote& q = quotes[histFetchIndex];
+            // Skip if history is still fresh
+            if (q.histFetchedAt > 0 &&
+                (millis() - q.histFetchedAt) < HISTORY_REFRESH_MS) {
+                histFetchIndex++;
+                continue;
+            }
+            int fetched = histFetchIndex;
+            histFetchIndex++;
+            return fetchHistory(fetched);
+        }
+        histFetchIndex++;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Advance round-robin and fetch the next symbol.
 // Returns true when a fetch was attempted.
 // Call periodically from loop() — e.g., every STOCK_REFRESH_MS / symbolCount().
@@ -530,10 +636,12 @@ static void begin() {
         quotes[i].status    = STATUS_PENDING;
         quotes[i].failCount = 0;
         if (strlen(Settings::stockSymbols[i]) > 0) {
-            // If the symbol changed, drop the old name so we don't show a stale
-            // label next to the new ticker until the next fetch fills it in.
+            // If the symbol changed, drop the old name and history so we don't
+            // show stale data next to the new ticker.
             if (strcmp(quotes[i].symbol, Settings::stockSymbols[i]) != 0) {
-                quotes[i].name[0] = '\0';
+                quotes[i].name[0]       = '\0';
+                quotes[i].weeklyCount   = 0;
+                quotes[i].histFetchedAt = 0;
             }
             strncpy(quotes[i].symbol, Settings::stockSymbols[i], sizeof(quotes[i].symbol) - 1);
         } else {
