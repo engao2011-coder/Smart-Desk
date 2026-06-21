@@ -202,6 +202,8 @@ static void fillPanel(int y, int h, uint16_t color) {
 static void playPanelTransition(int direction);
 static void showBanner(const char* text, uint32_t durationMs, BannerStyle style);
 static void drawPanelChevrons();
+static uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha);
+static uint16_t signalColor(Stocks::Signal s);
 
 static void updateTheme() {
     bool wantDark;
@@ -978,6 +980,24 @@ static void drawHomeStocksTile() {
     float mPct = Stocks::metricPct(q);
     uint16_t pc = (mPct >= 0) ? theme.green : theme.red;
 
+    // Signal badge (header row, right) — a small tinted pill with the rating.
+    // Short word here (240px screen); the full DCA guidance lives in the web UI.
+    Stocks::Signal sig = Stocks::computeSignal(idx);
+    if (sig != Stocks::SIG_NONE) {
+        uiSmallFont();
+        const char* lbl = Stocks::signalShort(sig);
+        uint16_t   sc   = signalColor(sig);
+        int  pillW = tft.textWidth(lbl) + 14;
+        int  pillX = SCREEN_W - HOME_PAD - pillW;
+        int  pillY = top - 3;
+        int  pillH = 17;
+        uint16_t pillBg = blend565(sc, theme.panel, 48);
+        tft.fillRoundRect(pillX, pillY, pillW, pillH, 8, pillBg);
+        tft.setTextColor(sc, pillBg);
+        tft.setCursor(pillX + 7, pillY + (pillH + UI_SMALL_CAP) / 2 - 1);
+        tft.print(lbl);
+    }
+
     const int rowY = top + 20;
 
     // Coloured rail at the left signals up/down.
@@ -1327,6 +1347,18 @@ static uint16_t blend565(uint16_t fg, uint16_t bg, uint8_t alpha) {
     return (uint16_t)((rr << 11) | (rg << 5) | rb);
 }
 
+// Theme colour for a technical signal: mint for buy, red for trim, gold for
+// hold, dim for "not enough data".
+static uint16_t signalColor(Stocks::Signal s) {
+    switch (s) {
+        case Stocks::SIG_STRONG_BUY:
+        case Stocks::SIG_BUY:   return theme.green;
+        case Stocks::SIG_TRIM:  return theme.red;
+        case Stocks::SIG_HOLD:  return theme.gold;
+        default:                return theme.textDim;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sparkline — draws a polyline of `count` price points into the rect (x,y,w,h).
 // Oldest point is prices[0], newest is prices[count-1].
@@ -1542,14 +1574,24 @@ static void drawStocksPanel() {
             tft.setCursor(nameX, cTop + 14);
             tft.print(nameBuf);
 
-            // Price (left, line 2) — secondary context.
+            // Price (left, line 2) — secondary context, preceded by a small
+            // colour-coded signal tag (B / S / H …) when a rating is available.
+            tft.setFreeFont(nullptr);
+            tft.setTextSize(1);
+            int priceX = nameX;
+            Stocks::Signal sig = Stocks::computeSignal(i);
+            if (sig != Stocks::SIG_NONE) {
+                const char* tag = Stocks::signalTag(sig);
+                tft.setTextColor(signalColor(sig), rowBg);
+                tft.setCursor(priceX, cTop + 26);
+                tft.print(tag);
+                priceX += tft.textWidth(tag) + 5;
+            }
             char priceBuf[16];
             if (Settings::stockEuro) snprintf(priceBuf, sizeof(priceBuf), "EUR %.2f", Stocks::euroPrice(q));
             else                     snprintf(priceBuf, sizeof(priceBuf), "$%.2f", q.price);
-            tft.setFreeFont(nullptr);
-            tft.setTextSize(1);
             tft.setTextColor(theme.textSec, rowBg);
-            tft.setCursor(nameX, cTop + 26);
+            tft.setCursor(priceX, cTop + 26);
             tft.print(priceBuf);
 
             // 52-week sparkline (right, line 2): tiny 60×14px chart.

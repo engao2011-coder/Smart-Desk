@@ -161,6 +161,18 @@ static const char* STOCK_SYMBOLS[MAX_STOCKS] = {
 // Summary "Stocks" card rotation — cycle through symbols this often on the Home page
 #define STOCK_SUMMARY_ROTATE_MS  5000   // 5 s per symbol
 
+// ── Buy/Hold/Trim signal — technical-indicator defaults ─────────────────────
+// Tune Stocks::computeSignal(). All are overridable from the web settings page
+// (Settings → Buy/Sell Signal); these are just the initial defaults. The signal
+// is DCA-oriented: it leans toward buying dips and never recommends a full sell
+// (the most negative rating is TRIM). All assets share these settings.
+#define SIGNAL_SMA_WEEKS     40     // trend moving-average lookback (weeks)
+#define SIGNAL_TREND_PCT     5.0f   // % above/below the average = a *strong* trend
+#define SIGNAL_MOM_WEEKS     10     // momentum lookback (weeks)
+#define SIGNAL_MOM_PCT       6.0f   // % move over that window = *strong* momentum
+#define SIGNAL_RANGE_EDGE    20.0f  // top/bottom % of the 52-week range (position factor, ×2 weight)
+#define SIGNAL_MIN_WEEKS     8      // weeks of history required before any rating
+
 // ---------------------------------------------------------------------------
 // UI / Display behaviour
 // ---------------------------------------------------------------------------

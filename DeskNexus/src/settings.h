@@ -70,6 +70,29 @@ static bool stockEuro = false;
 // Stock refresh interval in minutes (maps to STOCK_REFRESH_MS default)
 static int  stockRefreshMin = STOCK_REFRESH_MS / 60000;
 
+// Buy/Hold/Trim signal thresholds (consumed by Stocks::computeSignal).
+// INDEPENDENT PER STOCK: every parameter is an array indexed by stock slot, so
+// each symbol can be tuned on its own. Defaults from config.h; all editable
+// from the web settings page.
+static int   signalSmaWeeks[MAX_STOCKS];   // trend MA lookback (weeks)
+static float signalTrendPct[MAX_STOCKS];   // strong-trend band (%)
+static int   signalMomWeeks[MAX_STOCKS];   // momentum lookback (weeks)
+static float signalMomPct[MAX_STOCKS];     // strong-momentum band (%)
+static float signalRangeEdge[MAX_STOCKS];  // 52-week range edge (%)
+static int   signalMinWeeks[MAX_STOCKS];   // min history before rating (weeks)
+
+// Seed every stock slot with the compiled signal defaults (config.h).
+static void applySignalDefaults() {
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        signalSmaWeeks[i]  = SIGNAL_SMA_WEEKS;
+        signalTrendPct[i]  = SIGNAL_TREND_PCT;
+        signalMomWeeks[i]  = SIGNAL_MOM_WEEKS;
+        signalMomPct[i]    = SIGNAL_MOM_PCT;
+        signalRangeEdge[i] = SIGNAL_RANGE_EDGE;
+        signalMinWeeks[i]  = SIGNAL_MIN_WEEKS;
+    }
+}
+
 // Web admin password — when non-empty, overrides the default device password
 // for web-UI / OTA Basic Auth. Empty means "use the MAC-derived AP password".
 // The AP (hotspot) join password is unaffected and stays MAC-derived.
@@ -102,6 +125,7 @@ static void load() {
     // Seed compiled defaults first so they survive an NVS version-mismatch wipe
     // (that path returns early) and are overwritten only by stored values.
     applyCompiledStockDefaults();
+    applySignalDefaults();
 
     Preferences prefs;
     prefs.begin("settings", false);  // read-write (needed for potential migration)
@@ -150,6 +174,17 @@ static void load() {
 
     stockEuro = prefs.getBool("stkEur", stockEuro);
     stockRefreshMin = prefs.getInt("stkRef", stockRefreshMin);
+
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        char k[12];
+        snprintf(k, sizeof(k), "sgSma%d", i); signalSmaWeeks[i]  = prefs.getInt(k,   signalSmaWeeks[i]);
+        snprintf(k, sizeof(k), "sgTrn%d", i); signalTrendPct[i]  = prefs.getFloat(k, signalTrendPct[i]);
+        snprintf(k, sizeof(k), "sgMmW%d", i); signalMomWeeks[i]  = prefs.getInt(k,   signalMomWeeks[i]);
+        snprintf(k, sizeof(k), "sgMmP%d", i); signalMomPct[i]    = prefs.getFloat(k, signalMomPct[i]);
+        snprintf(k, sizeof(k), "sgRng%d", i); signalRangeEdge[i] = prefs.getFloat(k, signalRangeEdge[i]);
+        snprintf(k, sizeof(k), "sgMnW%d", i); signalMinWeeks[i]  = prefs.getInt(k,   signalMinWeeks[i]);
+    }
+
     prefs.getString("admPw", adminPassword, sizeof(adminPassword));
 
     prefs.end();
@@ -197,6 +232,17 @@ static void save() {
 
     prefs.putBool("stkEur", stockEuro);
     prefs.putInt("stkRef", stockRefreshMin);
+
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        char k[12];
+        snprintf(k, sizeof(k), "sgSma%d", i); prefs.putInt(k,   signalSmaWeeks[i]);
+        snprintf(k, sizeof(k), "sgTrn%d", i); prefs.putFloat(k, signalTrendPct[i]);
+        snprintf(k, sizeof(k), "sgMmW%d", i); prefs.putInt(k,   signalMomWeeks[i]);
+        snprintf(k, sizeof(k), "sgMmP%d", i); prefs.putFloat(k, signalMomPct[i]);
+        snprintf(k, sizeof(k), "sgRng%d", i); prefs.putFloat(k, signalRangeEdge[i]);
+        snprintf(k, sizeof(k), "sgMnW%d", i); prefs.putInt(k,   signalMinWeeks[i]);
+    }
+
     prefs.putString("admPw", adminPassword);
 
     prefs.end();
@@ -241,6 +287,9 @@ static void resetToDefaults() {
 
     stockEuro = false;
     stockRefreshMin = STOCK_REFRESH_MS / 60000;
+
+    applySignalDefaults();
+
     adminPassword[0] = '\0';
 
     Serial.println("[Settings] Reset to compiled defaults.");

@@ -355,26 +355,77 @@ static const char STATUS_CSS[] =
   "font-size:.84rem;text-decoration:none}.btn-link:hover{color:#3dd9a0}";
 
 static const char SETTINGS_CSS[] =
-  "body{padding:18px 0}.card{max-width:440px}"
-  "label{display:block;margin:12px 0 4px;font-size:.82rem;color:#9ba6b4}"
+  "body{display:block;padding:14px 0 88px}"
+  ".card{max-width:460px;margin:0 auto;background:transparent;border:none;box-shadow:none;padding:0 14px}"
+  "h2{display:none}"
+  // device header strip
+  ".shead{display:flex;align-items:center;gap:11px;background:#161b22;border:1px solid #232b35;"
+  "border-radius:14px;padding:14px 15px;margin-bottom:12px}"
+  ".shead .ic{width:34px;height:34px;border-radius:9px;background:rgba(255,176,83,.14);"
+  "display:flex;align-items:center;justify-content:center;font-size:1.1rem}"
+  ".shead .nm{font-size:1rem;font-weight:600;color:#fff}"
+  ".shead .sub{font-size:.74rem;color:#6b7682}"
+  ".shead .on{margin-left:auto;font-size:.68rem;font-weight:600;color:#3dd9a0;"
+  "background:rgba(61,217,160,.16);padding:3px 9px;border-radius:6px}"
+  // labels & inputs
+  "label{display:block;margin:12px 0 4px;font-size:.78rem;color:#9ba6b4}"
   "select,input[type=text],input[type=number],input[type=password]{"
   "width:100%;padding:10px;border:1px solid #2a323d;border-radius:8px;"
   "background:#1c232d;color:#e6eaf0;font-size:.95rem;box-sizing:border-box}"
   "select:focus,input:focus{outline:none;border-color:#ffb053}"
   ".row{display:flex;gap:10px}.row>div{flex:1}"
-  "input[type=submit]{width:100%;padding:13px;border:none;border-radius:9px;"
-  "background:#ffb053;color:#3a2402;cursor:pointer;margin-top:24px;font-weight:600;font-size:1rem}"
-  "input[type=submit]:hover{background:#e89a3d}"
+  ".hint{font-size:.76rem;color:#6b7682;line-height:1.5;margin:6px 0 0}"
+  // collapsible section cards
+  "details.sec{background:#161b22;border:1px solid #232b35;border-radius:13px;margin:11px 0;overflow:hidden}"
+  "details.sec>summary{display:flex;align-items:center;gap:9px;padding:13px 15px;cursor:pointer;"
+  "list-style:none;font-size:.85rem;font-weight:600;color:#e6eaf0}"
+  "details.sec>summary::-webkit-details-marker{display:none}"
+  "details.sec>summary .ico{font-size:1.02rem;line-height:1}"
+  "details.sec>summary .ttl{flex:1}"
+  ".chev{color:#6b7682;font-size:.7rem;transition:transform .2s}"
+  "details.sec[open]>summary .chev{transform:rotate(180deg)}"
+  ".chip{font-size:.66rem;font-weight:600;padding:2px 8px;border-radius:5px}"
+  ".chip.ok{color:#3dd9a0;background:rgba(61,217,160,.14)}"
+  ".chip.warn{color:#ffb053;background:rgba(255,176,83,.14)}"
+  ".chip.mut{color:#9ba6b4;background:#1c232d}"
+  ".sbody{padding:2px 15px 15px;border-top:1px solid #1e2630}"
+  // nested collapsibles (per-stock, scoring help, saved wifi)
+  ".sbody details{margin:10px 0;border:1px solid #232b35;border-radius:9px;background:#12161c}"
+  ".sbody details>summary{display:flex;align-items:center;gap:7px;padding:9px 12px;cursor:pointer;"
+  "list-style:none;font-size:.8rem;color:#cdd5df}"
+  ".sbody details>summary::-webkit-details-marker{display:none}"
+  ".sbody details>summary::before{content:'\xE2\x96\xB8';color:#6b7682;font-size:.66rem}"
+  ".sbody details[open]>summary::before{content:'\xE2\x96\xBE'}"
+  ".ndbody{padding:0 12px 12px}"
+  // segmented control (radios)
+  ".seg{display:flex;background:#1c232d;border:1px solid #2a323d;border-radius:9px;overflow:hidden;margin-top:6px}"
+  ".seg input{position:absolute;opacity:0;pointer-events:none}"
+  ".seg label{flex:1;margin:0;text-align:center;padding:9px 4px;font-size:.82rem;color:#9ba6b4;cursor:pointer}"
+  ".seg input:checked+label{background:#ffb053;color:#3a2402;font-weight:600}"
+  // toggle switch
+  ".tgl{display:flex;align-items:center;gap:10px;margin:14px 0 0;font-size:.82rem;color:#cdd5df;cursor:pointer}"
+  ".sw{position:relative;display:inline-block;width:38px;height:21px;flex:none}"
+  ".sw input{opacity:0;width:0;height:0}"
+  ".sw .sl{position:absolute;inset:0;background:#2a323d;border-radius:11px;transition:.2s}"
+  ".sw .sl:before{content:'';position:absolute;width:15px;height:15px;left:3px;top:3px;"
+  "background:#e6eaf0;border-radius:50%;transition:.2s}"
+  ".sw input:checked+.sl{background:#ffb053}"
+  ".sw input:checked+.sl:before{transform:translateX(17px);background:#3a2402}"
+  // sticky save bar
+  ".savebar{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;align-items:center;gap:12px;"
+  "padding:11px 16px;background:rgba(17,21,27,.96);border-top:1px solid #232b35}"
+  ".savebar .st{flex:1;font-size:.74rem;color:#6b7682}"
+  ".savebar .st.dirty{color:#ffb053}"
+  ".savebar input[type=submit]{width:auto;margin:0;padding:11px 24px;border:none;border-radius:9px;"
+  "background:#ffb053;color:#3a2402;cursor:pointer;font-weight:600;font-size:.92rem}"
+  ".savebar input[type=submit]:hover{background:#e89a3d}"
+  // footer links
   ".link{text-align:center;margin-top:16px}.link a{color:#3dd9a0;font-size:.85rem}"
-  ".rst{display:block;text-align:center;margin-top:12px;color:#ff6470;font-size:.8rem;text-decoration:none}"
-  ".hint{font-size:.78rem;color:#6b7682;line-height:1.5;margin:5px 0 0}"
-  "details{margin:16px 0 4px}"
-  "summary{color:#ffb053;font-size:.78rem;letter-spacing:1.3px;text-transform:uppercase;"
-  "border-bottom:1px solid #232b35;padding-bottom:6px;"
-  "cursor:pointer;font-weight:600;list-style:none}"
-  "summary::-webkit-details-marker{display:none}"
-  "summary::before{content:'\xE2\x96\xB8  ';font-size:.8rem}"
-  "details[open]>summary::before{content:'\xE2\x96\xBE  '}";
+  ".rst{display:block;text-align:center;margin:12px 0 4px;color:#ff6470;font-size:.8rem;text-decoration:none}"
+  // saved toast
+  ".toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:60;"
+  "background:#13241c;border:1px solid #2e6b50;color:#3dd9a0;font-size:.84rem;font-weight:600;"
+  "padding:10px 18px;border-radius:10px;box-shadow:0 8px 24px #0007;transition:opacity .4s}";
 
 static const char OTA_CSS[] =
   "label{display:block;margin:12px 0 4px;font-size:.85rem;color:#9ba6b4}"
@@ -511,15 +562,28 @@ static String statusPage() {
 static String settingsPage() {
     String html = pageHead("DeskNexus Settings", SETTINGS_CSS);
     html += R"rawhtml(<body>
-<div class="card">
-  <h2>&#9881; DeskNexus Settings</h2>
+<div class="card">)rawhtml";
+
+    // One-shot confirmation toast after a successful save redirect (/settings?saved=1).
+    if (server.arg("saved") == "1")
+        html += R"rawhtml(<div class="toast" id="toast">&#10003; Settings saved</div>)rawhtml";
+
+    html += R"rawhtml(
+  <div class="shead">
+    <div class="ic">&#9881;</div>
+    <div><div class="nm">DeskNexus</div><div class="sub">desknexus.local &middot; )rawhtml";
+    html += WiFi.localIP().toString();
+    html += R"rawhtml(</div></div>
+    <span class="on">Online</span>
+  </div>
   <form method="POST" action="/save-settings">
     <input type="hidden" name="csrf" value=")rawhtml";
     html += String(csrfToken);
     html += R"rawhtml(">
 
-    <details open>
-    <summary>Location &amp; Time</summary>
+    <details class="sec" open>
+    <summary><span class="ico">&#128205;</span><span class="ttl">Location &amp; time</span><span class="chev">&#9662;</span></summary>
+    <div class="sbody">
     <div class="row">
       <div>
         <label for="city">City</label>
@@ -534,18 +598,14 @@ static String settingsPage() {
     html += R"rawhtml(">
       </div>
     </div>
-    <div class="row">
-      <div>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" name="autoCity" value="1")rawhtml";
+    <label class="tgl">
+      <span class="sw"><input type="checkbox" name="autoCity" value="1")rawhtml";
     if (!Settings::cityManual) html += " checked";
-    html += R"rawhtml(>
-          Auto-detect city from IP (uncheck to lock manual city)
-        </label>
-      </div>
-    </div>
+    html += R"rawhtml(><span class="sl"></span></span>
+      Auto-detect city from IP (off locks to manual city)
+    </label>
 
-    <label for="utc">Timezone (UTC Offset)</label>
+    <label for="utc">Timezone (UTC offset)</label>
     <select id="utc" name="utc">)rawhtml";
 
     struct { long sec; const char* label; } tzOpts[] = {
@@ -574,47 +634,65 @@ static String settingsPage() {
         html += "<option value=\"" + String(Settings::utcOffset) + "\" selected>Custom (" + String(Settings::utcOffset) + " s)</option>\n";
     }
     html += R"rawhtml(    </select>
-        <p class="hint">
-            Auto-detect: )rawhtml";
-        html += htmlEscape(String(Settings::autoDetectStatus));
-        html += " (";
-        html += Settings::autoDetectLastOk ? "OK" : "Failed";
-        html += R"rawhtml()
-        </p>
-    </details>
-
-    <details open>
-    <summary>Weather</summary>
-    <label for="owmkey">OpenWeatherMap API Key</label>
-    <input type="password" id="owmkey" name="owmkey" maxlength="46" value="" placeholder=")rawhtml";
-    {
-        // Never echo the stored key back to the browser. Show only whether one
-        // is set; a blank submit preserves the existing key (see handleSaveSettings).
-        bool hasOwmKey = strlen(Settings::owmApiKey) > 0 &&
-                         strcmp(Settings::owmApiKey, "YOUR_OPENWEATHERMAP_API_KEY") != 0;
-        html += hasOwmKey ? "Saved - leave blank to keep current key"
-                          : "Enter your API key";
-    }
-    html += R"rawhtml(">
-    <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank" style="color:#3dd9a0">openweathermap.org/appid</a>. Weather is optional — clock, prayers and stocks work without it.</p>
-    <div class="row">
-      <div>
-        <label for="units">Units</label>
-        <select id="units" name="units">
-          <option value="metric")rawhtml";
-    if (String(Settings::owmUnits) == "metric") html += " selected";
-    html += R"rawhtml(>Metric (°C)</option>
-          <option value="imperial")rawhtml";
-    if (String(Settings::owmUnits) == "imperial") html += " selected";
-    html += R"rawhtml(>Imperial (°F)</option>
-        </select>
-      </div>
+    <p class="hint">Auto-detect: )rawhtml";
+    html += htmlEscape(String(Settings::autoDetectStatus));
+    html += " (";
+    html += Settings::autoDetectLastOk ? "OK" : "Failed";
+    html += R"rawhtml()</p>
     </div>
     </details>
 
-    <details open>
-    <summary>Prayer Times</summary>
-    <label for="method">Calculation Method</label>
+    )rawhtml";
+
+    // Never echo the stored key back; show only whether one is set. A blank
+    // submit preserves the existing key (see handleSaveSettings).
+    bool hasOwmKey = strlen(Settings::owmApiKey) > 0 &&
+                     strcmp(Settings::owmApiKey, "YOUR_OPENWEATHERMAP_API_KEY") != 0;
+
+    html += R"rawhtml(<details class="sec" open>
+    <summary><span class="ico">&#9925;</span><span class="ttl">Weather</span>)rawhtml";
+    html += hasOwmKey ? R"rawhtml(<span class="chip ok">key set</span>)rawhtml"
+                      : R"rawhtml(<span class="chip warn">no key</span>)rawhtml";
+    html += R"rawhtml(<span class="chev">&#9662;</span></summary>
+    <div class="sbody">
+    <label for="owmkey">OpenWeatherMap API key</label>
+    <input type="password" id="owmkey" name="owmkey" maxlength="46" value="" placeholder=")rawhtml";
+    html += hasOwmKey ? "Saved - leave blank to keep current key"
+                      : "Enter your API key";
+    html += R"rawhtml(">
+    <p class="hint">Free key at <a href="https://openweathermap.org/appid" target="_blank">openweathermap.org/appid</a>. Weather is optional &mdash; clock, prayers and stocks work without it.</p>
+    <label>Units</label>
+    <div class="seg">
+      <input type="radio" id="u-m" name="units" value="metric")rawhtml";
+    if (String(Settings::owmUnits) != "imperial") html += " checked";
+    html += R"rawhtml(><label for="u-m">Metric &deg;C</label>
+      <input type="radio" id="u-i" name="units" value="imperial")rawhtml";
+    if (String(Settings::owmUnits) == "imperial") html += " checked";
+    html += R"rawhtml(><label for="u-i">Imperial &deg;F</label>
+    </div>
+    </div>
+    </details>
+
+    )rawhtml";
+
+    // Prayer method short name for the section chip.
+    const char* pmShort = "Custom";
+    switch (Settings::prayerMethod) {
+        case 1:  pmShort = "MWL";     break;
+        case 2:  pmShort = "ISNA";    break;
+        case 3:  pmShort = "Egypt";   break;
+        case 4:  pmShort = "Makkah";  break;
+        case 5:  pmShort = "Karachi"; break;
+        case 8:  pmShort = "Gulf";    break;
+        case 16: pmShort = "Diyanet"; break;
+        case 17: pmShort = "Tehran";  break;
+    }
+    html += R"rawhtml(<details class="sec" open>
+    <summary><span class="ico">&#128338;</span><span class="ttl">Prayer times</span><span class="chip mut">)rawhtml";
+    html += pmShort;
+    html += R"rawhtml(</span><span class="chev">&#9662;</span></summary>
+    <div class="sbody">
+    <label for="method">Calculation method</label>
     <select id="method" name="method">)rawhtml";
 
     struct { int id; const char* name; } methods[] = {
@@ -631,41 +709,61 @@ static String settingsPage() {
 
     html += R"rawhtml(
     </select>
-    <p class="hint">Choose the method your local mosque follows. Default: Makkah (Umm Al-Qura) for Saudi Arabia.</p>
+    <p class="hint">Choose the method your local mosque follows. Default: Makkah (Umm Al-Qura).</p>
+    </div>
     </details>
 
-    <details>
-    <summary>Display</summary>
-    <label for="theme">Theme</label>
-    <select id="theme" name="theme">
-        <option value="auto")rawhtml";
-    if (Settings::themeMode == 0) html += " selected";
-    html += R"rawhtml(>Auto (dark at night)</option>
-        <option value="dark")rawhtml";
-    if (Settings::themeMode == 1) html += " selected";
-    html += R"rawhtml(>Always Dark</option>
-        <option value="light")rawhtml";
-    if (Settings::themeMode == 2) html += " selected";
-    html += R"rawhtml(>Always Light</option>
-    </select>
+    <details class="sec">
+    <summary><span class="ico">&#127912;</span><span class="ttl">Display</span><span class="chev">&#9662;</span></summary>
+    <div class="sbody">
+    <label>Theme</label>
+    <div class="seg">
+      <input type="radio" id="th-a" name="theme" value="auto")rawhtml";
+    if (Settings::themeMode == 0) html += " checked";
+    html += R"rawhtml(><label for="th-a">Auto</label>
+      <input type="radio" id="th-d" name="theme" value="dark")rawhtml";
+    if (Settings::themeMode == 1) html += " checked";
+    html += R"rawhtml(><label for="th-d">Dark</label>
+      <input type="radio" id="th-l" name="theme" value="light")rawhtml";
+    if (Settings::themeMode == 2) html += " checked";
+    html += R"rawhtml(><label for="th-l">Light</label>
+    </div>
+    <p class="hint">Auto switches to dark at night based on prayer times.</p>
+    </div>
     </details>
 
-    <details>
-    <summary>Stocks</summary>
-    <label for="stkRef">Refresh Interval (minutes)</label>
+    )rawhtml";
+
+    // Stocks status chip: count configured / ok / needs-attention slots.
+    {
+        int cfg = 0, okC = 0, badC = 0;
+        for (int i = 0; i < MAX_STOCKS; i++) {
+            if (strlen(Settings::stockSymbols[i]) == 0) continue;
+            cfg++;
+            if (Stocks::needsAttention(i))    badC++;
+            else if (Stocks::quotes[i].valid) okC++;
+        }
+        html += R"rawhtml(<details class="sec">
+    <summary><span class="ico">&#128200;</span><span class="ttl">Stocks</span>)rawhtml";
+        if (cfg == 0)      html += R"rawhtml(<span class="chip mut">off</span>)rawhtml";
+        else if (badC > 0) html += "<span class=\"chip warn\">" + String(badC) + " check</span>";
+        else               html += "<span class=\"chip ok\">" + String(okC) + " ok</span>";
+        html += R"rawhtml(<span class="chev">&#9662;</span></summary>
+    <div class="sbody">)rawhtml";
+    }
+    html += R"rawhtml(
+    <label for="stkRef">Refresh interval (minutes)</label>
     <input type="number" id="stkRef" name="stkRef" min="1" max="60" value=")rawhtml";
     html += String(Settings::stockRefreshMin);
     html += R"rawhtml(">
-    <p class="hint">How often to refresh stock prices. Default: 5 minutes. Range: 1–60 min.</p>
-    <p class="hint">Yahoo Finance symbols. Leave empty to disable. Example: IUSE.L, AAPL, MSFT</p>
-    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-      <input type="checkbox" name="stkEur" value="1")rawhtml";
+    <p class="hint">How often to refresh prices. Default 5 min. Range 1&ndash;60.</p>
+    <label class="tgl">
+      <span class="sw"><input type="checkbox" name="stkEur" value="1")rawhtml";
     if (Settings::stockEuro) html += " checked";
-    html += R"rawhtml(>
-      Show prices in EUR (uses live USD/GBP&rarr;EUR exchange rate from Yahoo Finance)
+    html += R"rawhtml(><span class="sl"></span></span>
+      Show prices in EUR (live USD/GBP&rarr;EUR rate)
     </label>
-    <p class="hint">EUR-denominated (.DE, .PA, .AS&hellip;) symbols are shown as-is. London (.L) prices are converted from GBX (pence). All other symbols are treated as USD.</p>
-    <p class="hint">Both the daily change (1D, vs previous close) and the change vs the 52-week high (52W) are shown together on the device.</p>
+    <p class="hint">Yahoo Finance symbols, one per slot &mdash; leave empty to disable. London (.L) converts from GBX (pence); .DE/.PA/.AS shown as-is; others treated as USD. The device shows both the daily change (1D) and the change vs the 52-week high (52W).</p>
     )rawhtml";
 
     for (int i = 0; i < MAX_STOCKS; i++) {
@@ -691,12 +789,60 @@ static String settingsPage() {
     }
 
     html += R"rawhtml(
+    </div>
     </details>
 
+    <details class="sec">
+    <summary><span class="ico">&#9878;</span><span class="ttl">Buy/sell signal</span><span class="chev">&#9662;</span></summary>
+    <div class="sbody">
+    <p class="hint">A mechanical, DCA-oriented technical rating shown on the Stocks page and Home card &mdash; <b>not financial advice</b>. It's buy-biased: it leans toward buying dips and never recommends a full sell (worst rating is TRIM). Each stock is tuned independently below.</p>
+
+    )rawhtml";
+
+    // Per-stock signal parameters — one collapsible group per configured symbol.
+    {
+        int configured = 0;
+        for (int i = 0; i < MAX_STOCKS; i++) {
+            if (strlen(Settings::stockSymbols[i]) == 0) continue;
+            configured++;
+            String si = String(i);
+            String title = htmlEscape(String(Settings::stockSymbols[i]));
+            if (Stocks::quotes[i].name[0])
+                title += " &middot; " + htmlEscape(String(Stocks::quotes[i].name));
+            html += "<details><summary>" + title + "</summary><div class=\"ndbody\">";
+            html += "<label>Trend average length (weeks)</label>"
+                    "<input type=\"number\" name=\"sigSma_" + si + "\" min=\"2\" max=\"52\" value=\"" + String(Settings::signalSmaWeeks[i]) + "\">";
+            html += "<label>Trend strength band (%)</label>"
+                    "<input type=\"number\" step=\"0.5\" name=\"sigTrn_" + si + "\" min=\"0.5\" max=\"50\" value=\"" + String(Settings::signalTrendPct[i], 1) + "\">";
+            html += "<label>Momentum window (weeks)</label>"
+                    "<input type=\"number\" name=\"sigMmW_" + si + "\" min=\"1\" max=\"26\" value=\"" + String(Settings::signalMomWeeks[i]) + "\">";
+            html += "<label>Momentum strength band (%)</label>"
+                    "<input type=\"number\" step=\"0.5\" name=\"sigMmP_" + si + "\" min=\"0.5\" max=\"50\" value=\"" + String(Settings::signalMomPct[i], 1) + "\">";
+            html += "<label>52-week range edge (%, double weighted)</label>"
+                    "<input type=\"number\" step=\"1\" name=\"sigRng_" + si + "\" min=\"1\" max=\"49\" value=\"" + String(Settings::signalRangeEdge[i], 0) + "\">";
+            html += "<label>Minimum history (weeks)</label>"
+                    "<input type=\"number\" name=\"sigMnW_" + si + "\" min=\"2\" max=\"52\" value=\"" + String(Settings::signalMinWeeks[i]) + "\">";
+            html += "</div></details>";
+        }
+        if (configured == 0)
+            html += "<p class=\"hint\">Add one or more stock symbols above first, then come back to tune each one.</p>";
+    }
+
+    html += R"rawhtml(
     <details>
-    <summary>Admin Password</summary>
-    <p class="hint">Protects the settings page and firmware updates. User name is always <b>admin</b>.</p>
-    <p class="hint">Currently using: )rawhtml";
+    <summary>How scoring works</summary>
+    <div class="ndbody">
+    <p class="hint"><b>Factors</b> (per stock): <i>Trend</i> = price vs its moving average (&plusmn;1, or &plusmn;2 past the band). <i>Momentum</i> = price move over the window (&plusmn;1, or &plusmn;2 past the band). <i>Position</i> = where price sits in its 52-week range, <b>double-weighted</b> (+2 near the low, &minus;2 near the high). Per-stock defaults: 40&nbsp;wk / 5% / 10&nbsp;wk / 6% / 20% / 8&nbsp;wk.</p>
+    <p class="hint"><b>Scoring:</b> total &ge; +3 &rarr; <b>STRONG BUY</b> (add aggressively); +1/+2 &rarr; <b>BUY</b> (add); &minus;2&hellip;0 &rarr; <b>HOLD</b> (stick to regular DCA); &le; &minus;3 &rarr; <b>TRIM</b> (trim slightly only, not a full sell).</p>
+    </div>
+    </details>
+    </div>
+    </details>
+
+    <details class="sec">
+    <summary><span class="ico">&#128274;</span><span class="ttl">Admin password</span><span class="chev">&#9662;</span></summary>
+    <div class="sbody">
+    <p class="hint">Protects the settings page and firmware updates. Username is always <b>admin</b>. Currently using )rawhtml";
     html += Settings::adminPassword[0] ? "a custom password." : "the default device password (shown on the setup screen).";
     html += R"rawhtml(</p>
     <label for="admPw">New password</label>
@@ -704,20 +850,22 @@ static String settingsPage() {
     <label for="admPw2">Confirm new password</label>
     <input type="password" id="admPw2" name="admPw2" maxlength="63" value="" placeholder="repeat new password" autocomplete="new-password">
     <p class="hint">Minimum 8 characters. Leave both blank to keep the current password. After changing it your browser will ask you to sign in again.</p>
-    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-      <input type="checkbox" name="admPwClear" value="1">
+    <label class="tgl">
+      <span class="sw"><input type="checkbox" name="admPwClear" value="1"><span class="sl"></span></span>
       Reset to the default device password
     </label>
-    )rawhtml";
-
-    html += R"rawhtml(
+    </div>
     </details>
 
-    <input type="submit" value="Save Settings">
+    <div class="savebar">
+      <span class="st" id="savest">No unsaved changes</span>
+      <input type="submit" value="Save settings">
+    </div>
   </form>
 
-  <details style="margin-top:20px">
-  <summary>Saved Wi-Fi Networks</summary>)rawhtml";
+  <details class="sec">
+  <summary><span class="ico">&#128246;</span><span class="ttl">Saved Wi-Fi networks</span><span class="chev">&#9662;</span></summary>
+  <div class="sbody">)rawhtml";
     if (savedNetworkCount == 0) {
         html += "<p class=\"hint\">No saved networks.</p>";
     } else {
@@ -733,30 +881,25 @@ static String settingsPage() {
         }
     }
     html += R"rawhtml(
+  </div>
   </details>
-  <div class="link"><a href="/">&#8592; Back to Status</a></div>
+  <div class="link"><a href="/">&#8592; Back to status</a></div>
   <a class="rst" href="/reset-settings?csrf=)rawhtml";
     html += String(csrfToken);
-    html += R"rawhtml(" onclick="return confirm('Reset all settings to defaults?')">Reset to Defaults</a>
+    html += R"rawhtml(" onclick="return confirm('Reset all settings to defaults?')">Reset to defaults</a>
 </div>
+<script>
+(function(){
+  var f=document.querySelector('form'), s=document.getElementById('savest');
+  if(f&&s) f.addEventListener('input',function(){s.textContent='Unsaved changes';s.className='st dirty';});
+  var t=document.getElementById('toast');
+  if(t){setTimeout(function(){t.style.opacity='0';},2200);setTimeout(function(){t.remove();},2700);}
+})();
+</script>
 </body>
 </html>
 )rawhtml";
     return html;
-}
-
-static String settingsSavedPage() {
-    return R"rawhtml(
-<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta http-equiv="refresh" content="2;url=/settings">
-<title>Saved</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#0d1015;color:#e6eaf0;
-display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center}h2{font-weight:600}</style>
-</head>
-<body><h2 style="color:#3dd9a0">&#10003; Settings saved!<br>Refreshing data...</h2></body>
-</html>
-)rawhtml";
 }
 
 // Error page shown when a submitted setting fails validation. Nothing was
@@ -1016,6 +1159,36 @@ static void handleSaveSettings() {
     // Stocks — currency display
     Settings::stockEuro = server.hasArg("stkEur") && server.arg("stkEur") == "1";
 
+    // Buy/Sell signal thresholds — independent per stock; clamp each to the same
+    // range the form enforces. Fields are suffixed with the stock slot index.
+    for (int i = 0; i < MAX_STOCKS; i++) {
+        String si = String(i);
+        if (server.hasArg("sigSma_" + si)) {
+            int x = server.arg("sigSma_" + si).toInt();
+            if (x >= 2 && x <= 52) Settings::signalSmaWeeks[i] = x;
+        }
+        if (server.hasArg("sigTrn_" + si)) {
+            float x = server.arg("sigTrn_" + si).toFloat();
+            if (x >= 0.5f && x <= 50.0f) Settings::signalTrendPct[i] = x;
+        }
+        if (server.hasArg("sigMmW_" + si)) {
+            int x = server.arg("sigMmW_" + si).toInt();
+            if (x >= 1 && x <= 26) Settings::signalMomWeeks[i] = x;
+        }
+        if (server.hasArg("sigMmP_" + si)) {
+            float x = server.arg("sigMmP_" + si).toFloat();
+            if (x >= 0.5f && x <= 50.0f) Settings::signalMomPct[i] = x;
+        }
+        if (server.hasArg("sigRng_" + si)) {
+            float x = server.arg("sigRng_" + si).toFloat();
+            if (x >= 1.0f && x <= 49.0f) Settings::signalRangeEdge[i] = x;
+        }
+        if (server.hasArg("sigMnW_" + si)) {
+            int x = server.arg("sigMnW_" + si).toInt();
+            if (x >= 2 && x <= 52) Settings::signalMinWeeks[i] = x;
+        }
+    }
+
     // Stocks
     for (int i = 0; i < MAX_STOCKS; i++) {
         String key = "stk" + String(i);
@@ -1052,7 +1225,9 @@ static void handleSaveSettings() {
     // Re-apply timezone
     TimeSync::apply(Settings::utcOffset, true);
 
-    server.send(200, "text/html", settingsSavedPage());
+    // Redirect back to the settings page; it shows an inline "saved" toast.
+    server.sendHeader("Location", "/settings?saved=1", true);
+    server.send(302, "text/plain", "");
 }
 
 static void handleResetSettings() {

@@ -204,6 +204,133 @@ static bool hasPeak(const Quote& q) {
 }
 
 // ---------------------------------------------------------------------------
+// Technical signal — a mechanical, DCA-oriented rating computed entirely
+// on-device from data we already fetch. This is NOT financial advice; it's a
+// rule-based indicator (the kind shown on finance summary pages) and, because
+// it works off WEEKLY closes, it is a slow, long-horizon read — not a
+// day-trading cue.
+//
+// Three factors are scored and summed:
+//   1. Trend    — current price vs a simple moving average of weekly closes
+//                 (above the average = uptrend).            [±1 / ±2]
+//   2. Momentum — price change over the momentum window.    [±1 / ±2]
+//   3. Position — where price sits in its 52-week range; near the low reads as
+//                 value, near the high as stretched. DOUBLE weighted so the
+//                 signal leans toward buying the dips.      [±2]
+//
+// The bucketing is deliberately buy-biased — it never recommends a full sell:
+//   total >= +3 -> STRONG BUY,  +1/+2 -> BUY,  -2..0 -> HOLD,  <= -3 -> TRIM.
+// ---------------------------------------------------------------------------
+enum Signal : int8_t {
+    SIG_NONE = 0,        // not enough history yet to rate
+    SIG_TRIM,            // most negative — trim slightly, never a full sell
+    SIG_HOLD,
+    SIG_BUY,
+    SIG_STRONG_BUY,
+};
+
+// Rate the quote in slot `idx` using THAT slot's own parameters (each stock is
+// tuned independently — see Settings::signal* arrays).
+static Signal computeSignal(int idx) {
+    if (idx < 0 || idx >= MAX_STOCKS) return SIG_NONE;
+    const Quote& q = quotes[idx];
+
+    // All thresholds are user-tunable (Settings); clamp to safe ranges here so a
+    // bad stored value can never produce a divide-by-zero or out-of-bounds read.
+    int minWeeks = Settings::signalMinWeeks[idx] < 2 ? 2 : Settings::signalMinWeeks[idx];
+    if (!q.valid || q.price <= 0.0f || q.weeklyCount < minWeeks)
+        return SIG_NONE;
+
+    // Simple moving average over the most recent up-to-N weekly closes.
+    int smaW = Settings::signalSmaWeeks[idx] < 2 ? 2 : Settings::signalSmaWeeks[idx];
+    int win  = (q.weeklyCount < smaW) ? q.weeklyCount : smaW;
+    float sum = 0.0f;
+    for (int i = q.weeklyCount - win; i < q.weeklyCount; i++) sum += q.weeklyPrices[i];
+    float sma = sum / (float)win;
+
+    // 52-week high/low straight from the weekly series.
+    float hi = q.weeklyPrices[0], lo = q.weeklyPrices[0];
+    for (int i = 1; i < q.weeklyCount; i++) {
+        if (q.weeklyPrices[i] > hi) hi = q.weeklyPrices[i];
+        if (q.weeklyPrices[i] < lo) lo = q.weeklyPrices[i];
+    }
+
+    int score = 0;
+
+    // 1) Trend — price relative to its moving average.
+    if (sma > 0.0f) {
+        float band = Settings::signalTrendPct[idx] / 100.0f;
+        float t = (q.price - sma) / sma;
+        if      (t >  band) score += 2;
+        else if (t >  0.0f) score += 1;
+        else if (t < -band) score -= 2;
+        else                score -= 1;
+    }
+
+    // 2) Momentum — price vs the close N weeks ago.
+    int momW = Settings::signalMomWeeks[idx] < 1 ? 1 : Settings::signalMomWeeks[idx];
+    int back = q.weeklyCount - 1 - momW;
+    if (back >= 0 && q.weeklyPrices[back] > 0.0f) {
+        float band = Settings::signalMomPct[idx] / 100.0f;
+        float m = (q.price - q.weeklyPrices[back]) / q.weeklyPrices[back];
+        if      (m >  band) score += 2;
+        else if (m >  0.0f) score += 1;
+        else if (m < -band) score -= 2;
+        else                score -= 1;
+    }
+
+    // 3) Position in the 52-week range — DOUBLE weighted (±2) so the rating
+    // leans toward buying dips: near the yearly low adds +2, near the high −2.
+    if (hi > lo) {
+        float edge = Settings::signalRangeEdge[idx] / 100.0f;
+        if (edge < 0.01f) edge = 0.01f;
+        if (edge > 0.49f) edge = 0.49f;
+        float pos = (q.price - lo) / (hi - lo);   // 0 = at low, 1 = at high
+        if      (pos < edge)        score += 2;
+        else if (pos > 1.0f - edge) score -= 2;
+    }
+
+    // Buy-biased bucketing — there is no SELL; the most negative rating is TRIM.
+    if      (score >=  3) return SIG_STRONG_BUY;
+    else if (score >=  1) return SIG_BUY;
+    else if (score <= -3) return SIG_TRIM;
+    else                  return SIG_HOLD;     // covers 0, −1, −2
+}
+
+// Full rating with DCA guidance — for places with room (web UI, banners).
+static const char* signalLabel(Signal s) {
+    switch (s) {
+        case SIG_STRONG_BUY:  return "STRONG BUY (add aggressively)";
+        case SIG_BUY:         return "BUY (add)";
+        case SIG_HOLD:        return "HOLD (stick to regular DCA)";
+        case SIG_TRIM:        return "TRIM (trim slightly only, not a full sell)";
+        default:              return "";
+    }
+}
+
+// Short rating word — for the rotating summary card pill (240px screen).
+static const char* signalShort(Signal s) {
+    switch (s) {
+        case SIG_STRONG_BUY:  return "STRONG BUY";
+        case SIG_BUY:         return "BUY";
+        case SIG_HOLD:        return "HOLD";
+        case SIG_TRIM:        return "TRIM";
+        default:              return "";
+    }
+}
+
+// Compact 1–2 char tag — for the dense list rows.
+static const char* signalTag(Signal s) {
+    switch (s) {
+        case SIG_STRONG_BUY:  return "SB";
+        case SIG_BUY:         return "B";
+        case SIG_HOLD:        return "H";
+        case SIG_TRIM:        return "T";
+        default:              return "";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Human-readable label for a quote: the fetched company/fund name when we have
 // it, otherwise the ticker symbol so a row is never blank while a name loads.
 // ---------------------------------------------------------------------------

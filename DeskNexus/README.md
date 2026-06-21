@@ -11,7 +11,7 @@ Displays real-time clock, weather, prayer times, and live stock prices on a 2.8-
 - **Current weather** — temperature, feels-like, humidity, wind speed via OpenWeatherMap
 - **5-day forecast** — daily high/low with dominant weather icon
 - **Prayer times** — Fajr through Isha via Aladhan API; pre-alert banner + fullscreen Azan screen
-- **Stock / ETF monitor** — up to 10 symbols from Yahoo Finance (no API key required); daily change, 52-week high, optional EUR conversion
+- **Stock / ETF monitor** — up to 10 symbols from Yahoo Finance (no API key required); daily change, 52-week high, optional EUR conversion, plus an on-device DCA-oriented signal (STRONG BUY / BUY / HOLD / TRIM — a weekly-horizon technical indicator, not financial advice)
 - **Auto-detect city & timezone** — ipwho.is detects your location on every boot, no manual timezone entry needed
 - **Break reminder** — configurable interval (10–240 min); fullscreen prompt with auto-dismiss
 - **Setup wizard & QR code** — TFT shows AP SSID, password, and a scannable WiFi QR on first boot
@@ -125,7 +125,7 @@ Once connected to your network, open **`http://desknexus.local`** in any browser
 | Path | Description | Auth required |
 |------|-------------|---------------|
 | `/` | Status — firmware version, WiFi signal, last fetch times, auto-detect result | Open |
-| `/settings` | Configure location, OWM key, prayer method, stocks, theme, break reminder | Basic Auth |
+| `/settings` | Configure location, OWM key, prayer method, stocks, buy/sell signal thresholds, theme | Basic Auth |
 | `/update` | Browser-based firmware upload (HTTP OTA) | Basic Auth |
 
 **Credentials:** username `admin`, password shown on the AP setup TFT screen (`deskXXXX`).
@@ -186,7 +186,7 @@ All modules use a **header-only, single-translation-unit** pattern: state and fu
 | `time_sync.h` | `TimeSync` | NTP `configTime()` wrapper with a reapply guard and stable-read helper |
 | `weather.h` | `Weather` | OpenWeatherMap current weather fetch + 5-day forecast |
 | `prayer.h` | `Prayer` | Aladhan prayer times fetch, next-prayer tracking, Azan reminder engine |
-| `stocks.h` | `Stocks` | Yahoo Finance quote fetcher, EUR conversion, 52-week high metrics |
+| `stocks.h` | `Stocks` | Yahoo Finance quote fetcher, EUR conversion, 52-week high metrics, DCA-oriented buy/hold/trim signal |
 | `ota.h` | `OTA` | ArduinoOTA (UDP push) initialisation and loop handler |
 | `ui.h` | `UI` | TFT themes, layout constants, all drawing functions, touch dispatch |
 | `main.cpp` | — | `setup()` / `loop()` orchestration — the only file that includes all headers |
