@@ -1775,10 +1775,14 @@ static void updateClock(const struct tm& t) {
         updateAzanAnimation();
         return;
     }
-    // The clock lives in the Home banner. Refresh it plus the prayer tile so the
-    // countdown stays current — both cheap, no full-screen flicker.
+    // The clock lives in the Home banner. drawHomeBanner() clears the whole hero
+    // region (which includes the weather chip), so the chip must be repainted
+    // here too — otherwise the per-minute tick erases the weather until the next
+    // hourly fetch. Refresh the prayer tile as well so the countdown stays
+    // current — all cheap, no full-screen flicker.
     if (activePage == PAGE_HOME) {
         drawHomeBanner();
+        drawHomeWeatherTile();
         drawHomePrayerTile();
         tft.setFreeFont(nullptr);
         tft.setTextSize(1);
